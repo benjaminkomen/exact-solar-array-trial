@@ -1,0 +1,5 @@
+{
+  "name": "Exact web",
+  "install": "bash .cursor/install.sh",
+  "chromeExecutablePath": "/usr/bin/google-chrome"
+}
