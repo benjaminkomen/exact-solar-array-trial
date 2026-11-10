@@ -47,6 +47,24 @@ shape Viewport
 shape Reply
   ok: bool
 
+// app.ts simulate: the sun and the layout for the 3D screen, both spikes' one input
+shape Sim
+  hour: number
+  sunrise: number
+  sunset: number
+  elevation: number
+  azimuth: number
+  sunX: number
+  sunY: number
+  sunZ: number
+  intensity: number
+  tilt: number
+  boxes: number[]
+  total: number
+  time: string
+  sunriseLabel: string
+  sunsetLabel: string
+
 // Every route sits under the GitHub Pages subpath, so a reload of a pushed screen on the
 // live demo finds it. Exact's router has no base path, and `/` or a trailing slash
 // matches nothing here: `notfound` lands on top of Welcome and steps back at once.
@@ -61,6 +79,7 @@ routes nav
       compassHelp "/exact-solar-array-trial/custom/compass-help"
     production "/exact-solar-array-trial/production"
       linked "/exact-solar-array-trial/production/panel/:id"
+      simulate "/exact-solar-array-trial/production/simulate"
   notfound
 
 // formatters.ts formatWattage
@@ -83,6 +102,9 @@ fn roofLabel(r: string): string = r == "gable" ? "Gable" : r == "hip" ? "Hip" : 
 fn efficiencyText(e: number): string = `${round(e)}% efficiency`
 
 fn isWizard(e: Entry): bool = searchParam(e, "wizard") == "true"
+// The 3D screen's two spikes: ?engine=gpu is the wgpu module, anything else the three.js iframe
+fn isGpu(e: Entry): bool = searchParam(e, "engine") == "gpu"
+fn withEngine(base: string, gpu: bool): string = gpu ? `${base}?engine=gpu` : `${base}?engine=three`
 fn wiz(base: string, on: bool): string = on ? `${base}?wizard=true` : base
 
 component SolarApp
@@ -92,10 +114,10 @@ component SolarApp
   resource compass = compass() as shape Compass
   state tick = 0
   resource production = production(tick) as shape Production
-  mutation saved as shape Reply queue refreshes config, layout, production
-  mutation dropped as shape Reply queue refreshes layout, production then endDrag
+  mutation saved as shape Reply queue refreshes config, layout, production, sim
+  mutation dropped as shape Reply queue refreshes layout, production, sim then endDrag
   mutation aimed as shape Reply queue refreshes compass
-  mutation aimDone as shape Reply queue refreshes compass, config
+  mutation aimDone as shape Reply queue refreshes compass, config, sim
   state selected = ""
   state dragId = ""
   state dragDx = 0
@@ -129,6 +151,13 @@ component SolarApp
   state wattageDraft = "430"
   state serialDraft = ""
   state effDraft = 95
+  // ---- simulation.tsx: hour (-1 is solar noon, RN's start) and season (getCurrentSeason)
+  state simHour = -1
+  state season = "fall"
+  state frameReady = false
+  state frameFps = ""
+  resource sim = sim(simHour, season) as shape Sim
+  derive simMessage = `sun=${sim.sunX},${sim.sunY},${sim.sunZ};i=${sim.intensity};el=${sim.elevation};tilt=${sim.tilt};boxes=${sim.boxes.map(b => `${b}`).join(",")}`
   derive panels = layout.panels
   derive unlinked = panels.filter(p => p.inverterId == "").length
 
@@ -142,6 +171,9 @@ component SolarApp
     every(frame, zoomTick)
   task pzoomAnim when pzoomBusy
     every(frame, pzoomTick)
+  // The three.js guest gets the scene whenever it changes, once it has said it is ready.
+  task syncFrame when top(nav).name == "simulate" and frameReady key=simMessage
+    after(1, postScene)
 
   action goHome
     nav = back(nav)
@@ -328,6 +360,30 @@ component SolarApp
     nav = back(nav)
   action openLinked(id: string)
     nav = push(nav, path("linked", id))
+
+  // ---- simulation: the 3D spikes -------------------------------------------------------
+  action openSim(engine: string)
+    frameReady = false
+    frameFps = ""
+    nav = push(nav, withEngine(path("simulate"), engine == "gpu"))
+  action switchEngine(engine: string)
+    frameReady = false
+    frameFps = ""
+    nav = replace(nav, withEngine(path("simulate"), engine == "gpu"))
+  action setHour(v: number)
+    simHour = v
+  action pickSeason(s: string)
+    season = s
+    simHour = -1
+  action postScene
+    postMessage(simMessage, "sim3d")
+  // The guest's "ready" (its first message commits the frame's origin) and its frame rate
+  action heard(text: string)
+    if text == "ready"
+      frameReady = true
+      postMessage(simMessage, "sim3d")
+    else
+      frameFps = text
 
   // ---- configuration -------------------------------------------------------------
   action editWattage(v: string)
@@ -540,6 +596,8 @@ component SolarApp
           column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column" background-color="light-dark(#f9fafb, #111827)"
             header display="flex" align-items="center"
               text "" role="heading" aria-level=1 flex=1
+              button press=openSim("three") aria-label="Simulate" testId="simulate"
+                text "Simulate"
               button popovertarget="production-menu" aria-label="More" testId="production-more"
                 image "symbol:ellipsis"
               column id="production-menu" popover="auto" role="menu"
@@ -557,6 +615,39 @@ component SolarApp
               box position="absolute" top=16 right=16
                 CompassRose(angle=config.compassDirection, readOnly=true, down=ignorePointer, drag=ignorePan, release=ignoreRelease, tap=ignoreTap)
               ZoomControls(index=pzoom, zoomIn=pzoomIn, zoomOut=pzoomOut)
+        if e.name == "simulate"
+          // simulation.tsx: the scene above, SimulationControls below
+          column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column" background-color="light-dark(#f9fafb, #111827)"
+            header display="flex" align-items="center"
+              text "Simulation" role="heading" aria-level=1 flex=1
+            row testId="engine-picker" gap=4 margin-left=16 margin-right=16 margin-top=4 margin-bottom=8 padding=3 border-radius=9 background-color="light-dark(#e5e7eb, #1f2937)"
+              for opt in ["three", "gpu"] key=opt
+                button press=switchEngine(opt) testId=`engine-${opt}` aria-pressed=((opt == "gpu") == isGpu(e)) appearance="none" flex=1 padding-top=6 padding-bottom=6 border-radius=7 background-color=((opt == "gpu") == isGpu(e) ? "light-dark(#ffffff, #374151)" : "transparent")
+                  text (opt == "gpu" ? "wgpu module" : "three.js iframe") font-size=13 font-weight=600 text-align="center"
+            box testId="sim-scene" flex=1 min-height=0 position="relative" overflow="hidden" background-color="#9ec5d6"
+              if isGpu(e)
+                // Under the canvas: seen only when this browser has no WebGPU and the canvas stays empty
+                column position="absolute" inset=0 align-items="center" justify-content="center" padding=24 gap=8
+                  text "This view needs WebGPU" font-weight=600 color="#1f2937"
+                  text "The wgpu module draws with WebGPU, which this browser does not offer. Try the three.js tab, or Chrome, Edge or Safari 26." font-size=13 text-align="center" color="#374151"
+                canvas surface=roof(sim.boxes, sim.sunX, sim.sunY, sim.sunZ, sim.intensity, sim.elevation, sim.tilt) position="absolute" inset=0 width="100%" height="100%" testId="sim-gpu"
+              else
+                iframe id="sim3d" src="assets/sim3d/index.html" sandbox="allow-scripts allow-same-origin" message=heard width="100%" height="100%" border-width=0 testId="sim-frame"
+                if frameFps != ""
+                  text `${frameFps.replaceAll("fps=", "")} fps` testId="sim-fps" position="absolute" left=8 bottom=8 font-size=11 padding="2px 6px" border-radius=4 color="#ffffff" background-color="rgba(0, 0, 0, 0.45)"
+            column testId="sim-controls" padding-left=16 padding-right=16 padding-top=12 padding-bottom=16 border-top-width=1 border-top-style="solid" border-top-color="light-dark(#e5e7eb, #374151)" background-color="light-dark(rgba(255, 255, 255, 0.95), rgba(0, 0, 0, 0.85))"
+              row justify-content="space-between" align-items="baseline" margin-bottom=8
+                text "Total Output" font-size=14 font-weight=600 text-transform="uppercase" letter-spacing=0.3 color="light-dark(#6b7280, #9ca3af)"
+                text formatWattage(sim.total) font-size=32 font-weight=700 font-variant-numeric="tabular-nums" testId="sim-total"
+              text sim.time font-size=40 font-weight=700 font-variant-numeric="tabular-nums" text-align="center" margin-bottom=4 testId="sim-time"
+              row align-items="center" gap=8 margin-bottom=8 height=44
+                text sim.sunriseLabel font-size=11 width=60 text-align="center" font-variant-numeric="tabular-nums" color="light-dark(#6b7280, #9ca3af)"
+                input type="range" min=sim.sunrise max=sim.sunset step=0.01 value=sim.hour input=setHour aria-label="Hour" testId="sim-hour" flex=1 min-width=0
+                text sim.sunsetLabel font-size=11 width=60 text-align="center" font-variant-numeric="tabular-nums" color="light-dark(#6b7280, #9ca3af)"
+              row testId="season-picker" gap=2 padding=2 border-radius=9 background-color="light-dark(#eeeef0, #1f2937)"
+                for s in ["spring", "summer", "fall", "winter"] key=s
+                  button press=pickSeason(s) testId=`season-${s}` aria-pressed=(s == season) appearance="none" flex=1 padding-top=7 padding-bottom=7 border-radius=7 background-color=(s == season ? "light-dark(#ffffff, #374151)" : "transparent")
+                    text (s == "spring" ? "Spring" : s == "summer" ? "Summer" : s == "fall" ? "Fall" : "Winter") font-size=13 font-weight=(s == season ? 600 : 400) text-align="center"
         if e.name == "linked"
           for p in panels.filter(q => q.id == e.params.id) key=p.id
             column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="linked-list" position="absolute" inset=0 display="flex" flex-direction="column"

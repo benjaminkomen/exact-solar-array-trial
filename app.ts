@@ -130,8 +130,79 @@ function fluctuation(tick: number, i: number) {
   return 0.95 + (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 0.1;
 }
 
+// ---- solarCalculations.ts + useSimulationControls + SimulationScene (the 3D screen) ----
+// Amsterdam, the RN default when the config has no location. Hours are UTC solar hours;
+// formatTime shows local solar time (utc + longitude / 15), as RN does.
+const LAT = 52.37, LON = 4.9, D2R = Math.PI / 180;
+const SEASON_DAY: Record<string, number> = { spring: 79, summer: 172, fall: 265, winter: 355 };
+const declination = (n: number) => 23.45 * Math.sin(((360 / 365) * (n - 81)) * D2R);
+const eot = (n: number) => { const b = ((360 / 365) * (n - 81)) * D2R; return 9.87 * Math.sin(2 * b) - 7.53 * Math.cos(b) - 1.5 * Math.sin(b); };
+function solarPosition(n: number, utcHour: number) {
+  const decl = declination(n) * D2R, lat = LAT * D2R;
+  const ha = (utcHour + LON / 15 + eot(n) / 60 - 12) * 15 * D2R;
+  const sinEl = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(ha);
+  const elevation = Math.asin(sinEl) / D2R;
+  const cosEl = Math.cos(elevation * D2R);
+  let azimuth = Math.acos(Math.max(-1, Math.min(1, (Math.sin(decl) - Math.sin(lat) * sinEl) / (Math.cos(lat) * cosEl)))) / D2R;
+  if (ha > 0) azimuth = 360 - azimuth;
+  return { elevation, azimuth };
+}
+function sunriseSunset(n: number) {
+  const cosHa = -Math.tan(LAT * D2R) * Math.tan(declination(n) * D2R);
+  const haH = Math.acos(Math.max(-1, Math.min(1, cosHa))) / D2R / 15;
+  const noon = 12 - LON / 15 - eot(n) / 60;
+  return { sunrise: noon - haH, sunset: noon + haH };
+}
+const irradiance = (el: number) => (el <= 0 ? 0 : 1361 * Math.pow(0.7, Math.pow(1 / Math.max(Math.sin(el * D2R), 0.01), 0.678)));
+function formatTime(utcHour: number) {
+  const local = (((utcHour + LON / 15) % 24) + 24) % 24;
+  const h = Math.floor(local), m = Math.floor((local - h) * 60);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+// computePanelLayout: the array's bounding box scaled to 10 world units, centred.
+// An empty layout gets RN's one seeded panel (simulationPanels.ts).
+function panelBoxes(): number[] {
+  const src = panels.length ? panels : [{ id: 'seed', x: 0, y: 0, rotation: 0, inverterId: '' }];
+  const r = src.map((p) => { const d = dimsOf(p.rotation); return { cx: p.x + d.width / 2, cy: p.y + d.height / 2, w: d.width, h: d.height }; });
+  const cx = (Math.min(...r.map((q) => q.cx)) + Math.max(...r.map((q) => q.cx))) / 2;
+  const cy = (Math.min(...r.map((q) => q.cy)) + Math.max(...r.map((q) => q.cy))) / 2;
+  const span = Math.max(Math.max(...r.map((q) => q.cx + q.w / 2)) - Math.min(...r.map((q) => q.cx - q.w / 2)),
+    Math.max(...r.map((q) => q.cy + q.h / 2)) - Math.min(...r.map((q) => q.cy - q.h / 2)), 1);
+  const k = 10 / span;
+  return r.flatMap((q) => [(q.cx - cx) * k, (q.cy - cy) * k, q.w * k, q.h * k]);
+}
+// getVisualSunPosition: a left-to-right arc whose height follows the season's peak.
+function visualSun(sunrise: number, sunset: number, hour: number, peak: number) {
+  const t = Math.max(0, Math.min(1, sunset > sunrise ? (hour - sunrise) / (sunset - sunrise) : 0.5));
+  const maxH = Math.max(5, 15 * Math.sin(Math.min(peak, 75) * D2R));
+  return { x: 20 * Math.cos(t * Math.PI), y: Math.max(0.5, maxH * Math.sin(t * Math.PI)), z: 25 };
+}
+function simulate(hour: number, season: string) {
+  const n = SEASON_DAY[season] ?? 172;
+  const { sunrise, sunset } = sunriseSunset(n);
+  const h = hour < 0 ? (sunrise + sunset) / 2 : Math.max(sunrise, Math.min(sunset, hour));
+  const pos = solarPosition(n, h);
+  const peak = solarPosition(n, (sunrise + sunset) / 2).elevation;
+  const sun = visualSun(sunrise, sunset, h, peak);
+  // getEffectiveOutput with a location, without the ±5% noise
+  const a = pos.elevation * D2R, b = panelTiltAngle * D2R, g = (pos.azimuth - compassDirection) * D2R;
+  const incidence = Math.max(0, Math.sin(a) * Math.cos(b) + Math.cos(a) * Math.sin(b) * Math.cos(g));
+  const factor = (irradiance(pos.elevation) / 1000) * incidence;
+  const total = panels.reduce((sum, p) => {
+    const inv = inverters.find((v) => v.id === p.inverterId);
+    return sum + (inv ? Math.round(defaultMaxWattage * (inv.efficiency / 100) * factor) : 0);
+  }, 0);
+  return {
+    hour: h, sunrise, sunset, elevation: pos.elevation, azimuth: pos.azimuth,
+    sunX: sun.x, sunY: sun.y, sunZ: sun.z, intensity: irradiance(pos.elevation) / 300,
+    tilt: panelTiltAngle, boxes: panelBoxes(), total,
+    time: formatTime(h), sunriseLabel: formatTime(sunrise), sunsetLabel: formatTime(sunset),
+  };
+}
+
 const ok = { ok: true };
 const sources: Sources = {
+  sim: ([hour, season]): Result<'sim'> => simulate(hour, season),
   config: (): Result<'config'> => ({ defaultMaxWattage, panelTiltAngle, roofType, compassDirection, inverters }),
   compass: (): Result<'compass'> => ({ angle: compassAngle, direction: compassDirection }),
   compassMove: ([dx, dy]) => {

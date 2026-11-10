@@ -1,0 +1,25 @@
+# The 3D simulation's GPU module (LLP 1009): one surface, `roof`, that draws the
+# sky, the ground, the tilted roof slab and the panels as lit boxes. Loaded on
+# demand: a wasm with wasm-bindgen glue on the web, a dylib natively.
+[package]
+name = "exact-solar-trial-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[lib]
+name = "exact_solar_trial_gpu"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+exact-gpu = { path = "../../exact/gpu" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+
+[build-dependencies]
+exact-gpu-reflect = { path = "../../exact/gpu/reflect" }

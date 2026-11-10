@@ -159,3 +159,34 @@ test "zoom eases over 200 ms through intermediate scales and lands on the target
   expect state zoomBusy == false
   expect state zoomBetween == false
 
+
+test "simulate: Production opens the 3D screen; the hour and season move the sun, both spikes"
+  clock +5
+  tap "get-started-button"
+  clock settle
+  tap "continue"
+  clock settle
+  tap "continue-without-photo"
+  clock settle
+  tap "panel-1"
+  tap "link-panel"
+  clock settle
+  tap "pick-1"
+  clock settle
+  tap "finish"
+  clock settle
+  tap "simulate"
+  clock settle
+  expect tree has "sim-frame"
+  expect text "sim-time" == "11:51 AM"
+  expect state sim.boxes.length == 40
+  type "sim-hour" "6.5"
+  clock settle
+  expect text "sim-time" == "6:49 AM"
+  tap "engine-gpu"
+  clock settle
+  expect tree has "sim-gpu"
+  expect tree missing "sim-frame"
+  tap "season-summer"
+  clock settle
+  expect text "sim-time" == "12:01 PM"

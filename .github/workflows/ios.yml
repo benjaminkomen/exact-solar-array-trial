@@ -20,6 +20,10 @@ on:
       - "app.json"
       - "app.test.contract"
       - "assets/**"
+      - "gpu/**"
+      - "apple/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "exact.mjs"
       - "package.json"
       - ".github/workflows/ios.yml"
@@ -79,8 +83,8 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       # Exact's own CI caches Cargo this way. app/target is the bake's
-      # CARGO_TARGET_DIR (the generated workspace lives under app/.exact/shells,
-      # which is not committed). exact/target holds the Hermes installer and
+      # CARGO_TARGET_DIR (the app authors its Cargo workspace beside app.json since
+      # it has a GPU module: web/, apple/ and gpu/). exact/target holds the Hermes installer and
       # Exact's host modules (SVG raster, and the Canvas GPU module when a
       # Metal toolchain is present).
       - uses: Swatinem/rust-cache@v2

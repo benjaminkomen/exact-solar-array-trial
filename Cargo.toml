@@ -1,0 +1,19 @@
+# The app's own Cargo workspace. Exact generates one under .exact/shells for an app
+# with no Rust; this app has a GPU module (gpu/, the 3D simulation's wgpu spike), so
+# it authors the workspace beside app.json. web/ and apple/ are the host crates Exact
+# would otherwise generate (scripts/app-shells.mjs authoredCrate).
+[workspace]
+members = ["web", "apple", "gpu"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+
+[patch.crates-io]
+accesskit_windows = { path = "../exact/vendor/accesskit-windows" }
+taffy = { path = "../exact/vendor/taffy" }
+parley = { path = "../exact/vendor/parley" }
+fontique = { path = "../exact/vendor/fontique" }
+wgpu-hal = { path = "../exact/vendor/wgpu-hal" }
