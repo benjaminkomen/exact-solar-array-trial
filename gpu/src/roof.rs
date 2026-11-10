@@ -149,7 +149,7 @@ struct Gpu {
     targets: Option<((u32, u32), wgpu::TextureView, wgpu::TextureView)>,
 }
 
-const SAMPLES: u32 = 1;
+const SAMPLES: u32 = 4;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SCENE_BYTES: u64 = 16 * 4 * 2 + 16 * 6;
 
