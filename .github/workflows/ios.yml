@@ -1,0 +1,155 @@
+# Build the Exact iOS app on a GitHub-hosted Mac.
+#
+# EAS Build expects a React Native project. Exact is not one: its iOS app is
+# produced by Exact's own script (bun exact.mjs ios), which needs Rust, Bun
+# and Xcode. This workflow is the workaround: a macos runner, Exact's tooling,
+# an unsigned device .ipa (ad-hoc signed, for a service that re-signs it) and
+# a Simulator .app. There are no Apple signing secrets.
+#
+# Exact is pre-alpha and changes daily. EXACT_REF pins the commit this repo
+# was last built against. Bump it when you update the Exact checkout.
+name: iOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.contract"
+      - "app.ts"
+      - "app.json"
+      - "app.test.contract"
+      - "assets/**"
+      - "exact.mjs"
+      - "package.json"
+      - ".github/workflows/ios.yml"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # github.com/expo/exact @ 2026-11-10 (the checkout the web demo was built with)
+  EXACT_REF: 1bdedcb30ffcb3a1dd8a181ba4ac16cb4f41ce19
+  BUN_VERSION: "1.4.2"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  EXACT_FEEDBACK: "0"
+
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout this app
+        uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Checkout Exact
+        uses: actions/checkout@v4
+        with:
+          repository: expo/exact
+          ref: ${{ env.EXACT_REF }}
+          path: exact
+
+      - name: Show Xcode
+        working-directory: ${{ github.workspace }}
+        run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-path && xcrun --sdk iphonesimulator --show-sdk-path
+
+      - name: Rust (Exact's rust-toolchain.toml)
+        working-directory: exact
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim --toolchain "$PIN"
+          echo "PINNED_RUST=$PIN" >> "$GITHUB_ENV"
+          rustc "+$PIN" --version
+          rustup target list --installed --toolchain "$PIN"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      # Exact's own CI caches Cargo this way. app/target is the bake's
+      # CARGO_TARGET_DIR (the generated workspace lives under app/.exact/shells,
+      # which is not committed). exact/target holds the Hermes installer and
+      # Exact's host modules (SVG raster, and the Canvas GPU module when a
+      # Metal toolchain is present).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: exact
+          cache-directories: |
+            ${{ github.workspace }}/app/target
+          prefix-key: ios-${{ env.EXACT_REF }}
+          key: macos-26
+
+      - name: Cache Hermes bundles
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/hermes-lean-sys
+          key: hermes-${{ env.EXACT_REF }}-${{ runner.os }}-aarch64-apple-ios-sim
+
+      - name: Bun dependencies
+        working-directory: exact
+        run: bun install --frozen-lockfile
+
+      # Targeted setup: the full `bun scripts/exact.mjs setup` also installs
+      # the web/game toolchain (nightly Rust, wasm-bindgen, Binaryen, Chrome).
+      # An iOS TypeScript app only needs the host and iOS Hermes bundles,
+      # installed the way Exact's README describes.
+      - name: Hermes bundles
+        working-directory: exact
+        run: |
+          install() {
+            cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target "$1"
+          }
+          install aarch64-apple-darwin
+          install aarch64-apple-ios
+          install aarch64-apple-ios-sim
+
+      - name: Cargo crates
+        working-directory: exact
+        run: cargo fetch --locked
+
+      - name: Build unsigned device .ipa
+        run: |
+          mkdir -p artifacts
+          bun exact.mjs ios --device --archive "$PWD/artifacts/ExactSolarTrial.ipa" --unsigned
+          ls -lh artifacts
+
+      - name: Build iOS Simulator .app
+        run: |
+          bun exact.mjs ios --no-install 2>&1 | tee /tmp/ios-sim.log
+          BUNDLE=$(sed -n 's/^host\/apple: \(.*\.app\) (.*/\1/p' /tmp/ios-sim.log | tail -1)
+          if [ -z "$BUNDLE" ] || [ ! -d "$BUNDLE" ]; then
+            echo "Could not find the Simulator .app from the build log." >&2
+            find target -name '*.app' -type d -print >&2 || true
+            exit 1
+          fi
+          echo "Simulator app: $BUNDLE"
+          ditto -c -k --keepParent "$BUNDLE" artifacts/ExactSolarTrial-simulator.app.zip
+          ls -lh artifacts
+
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExactSolarTrial-ios-ipa
+          path: |
+            app/artifacts/ExactSolarTrial.ipa
+            app/artifacts/ExactSolarTrial.receipt.json
+            app/artifacts/ExactSolarTrial.dSYM
+            app/artifacts/ExactSolarTrial.dSYMs
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Simulator .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExactSolarTrial-ios-simulator
+          path: app/artifacts/ExactSolarTrial-simulator.app.zip
+          if-no-files-found: error
+          retention-days: 14

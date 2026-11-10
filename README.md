@@ -2,7 +2,7 @@
 
 **Live demo:** https://benjaminkomen.github.io/exact-solar-array-trial/
 
-A trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework. It ports the main screens of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator) and tries to match them as closely as Exact allows. It runs on the web only.
+A trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework. It ports the main screens of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator) and tries to match them as closely as Exact allows. The live demo is a web build. An unsigned iOS build is produced in GitHub Actions (see below); EAS Build does not support Exact yet.
 
 The panel art follows the RN app's `BasePanelShape`, `SolarPanel` and `ProductionPanel` and is drawn in SVG:
 - a 60 × 120 panel with an 8-point corner radius and a 2-point frame;
@@ -88,6 +88,26 @@ Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update`
 Exact's router has no base path, and a trailing slash matches no route. To work around that:
 - every route in `app.contract` sits under `/exact-solar-array-trial`;
 - a `notfound` route catches `/` and the trailing-slash URL, then steps back to Welcome.
+
+## iOS build (GitHub Actions)
+
+EAS Build does not support Exact yet. Exact is not a React Native project, and its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode. Putting that on EAS would mean installing those tools on Expo's workers by hand. This repo uses a GitHub Actions workflow instead: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on the same `macos-26` runner Exact's own CI uses.
+
+The workflow checks out a pinned Exact commit (Exact is pre-alpha and changes daily), installs the Rust toolchain and iOS targets Exact pins, Bun, and the attested Hermes bundles Exact's README describes, then builds:
+
+- an unsigned device `.ipa`, with `bun exact.mjs ios --device --archive ExactSolarTrial.ipa --unsigned`. Exact ad-hoc signs it with no profile and no team, for a service that re-signs it.
+- an iOS Simulator `.app`, with `bun exact.mjs ios --no-install` (a compile check: it does not boot a simulator).
+
+There are no Apple signing secrets, so the `.ipa` cannot be installed on a phone until it is re-signed. Run the workflow from the Actions tab, or it runs on pushes to `main` that touch the app sources. The artifacts are attached to the run.
+
+The workflow does not run Exact's full `bun scripts/exact.mjs setup`, which also installs the web and game toolchain. It only installs what an iOS TypeScript app needs.
+
+To build the same way on a Mac, with Exact checked out next to this repo:
+
+```sh
+bun exact.mjs ios --device --archive ExactSolarTrial.ipa --unsigned
+bun exact.mjs ios --no-install
+```
 
 ## License
 

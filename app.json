@@ -10,11 +10,19 @@
     "name": "Exact Solar Trial"
   },
   "host": {
-    "web": {}
+    "web": {},
+    "ios": {
+      "minimumOS": "17.0",
+      "deviceFamily": [
+        "iphone",
+        "ipad"
+      ]
+    }
   },
   "deploy": {
     "store": {
-      "web": "0"
+      "web": "0",
+      "ios": "0"
     }
   }
 }
