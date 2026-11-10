@@ -81,6 +81,8 @@ bun exact.mjs agent web "tap get-started-button" "clock settle" "screenshot out.
 
 Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update` refreshes the generated files against your checkout.
 
+Cursor cloud agents use [`.cursor/environment.json`](.cursor/environment.json). Its install script clones the Exact commit pinned in [`.github/workflows/ios.yml`](.github/workflows/ios.yml) beside this repo, installs the Rust, Bun and Chrome that checkout requires, fetches the attested Hermes bundles and Cargo crates, and warms `bun exact.mjs test web` so `target/` is already built. A later run skips work that is already present. Feedback uploads stay off.
+
 ## Deploying the demo
 
 `scripts/deploy-pages.sh` builds the static site with `bun exact.mjs web-build --out dist` and force-pushes it to the `gh-pages` branch. GitHub Pages serves it from a subpath, so the script points `<base href>` at `/exact-solar-array-trial/`. It also copies `index.html` to `404.html`, so that reloading a pushed screen still loads the app.
