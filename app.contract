@@ -1,0 +1,61 @@
+// A one-screen slice of solar-array-simulator's array layout: tap a slot to place
+// or remove a panel; the totals follow. Wattage and inverter efficiencies are the
+// repo's defaults (configStore.ts); the per-panel output is getEffectiveOutput's
+// no-location formula without its ±5% noise, rounded as useProductionMonitor does.
+shape Slot
+  id: string
+  inverterId: string
+  efficiency: number
+
+shape PanelArray
+  maxWattage: number
+  slots: Slot[]
+
+routes nav
+  home "/"
+
+// formatters.ts formatWattage
+fn formatWattage(watts: number): string = watts >= 1000 ? `${(watts / 1000).toFixed(1)}kW` : `${watts}W`
+
+fn panelOutput(maxWattage: number, efficiency: number): number = round(maxWattage * efficiency / 100)
+
+component SolarArray
+  resource array = array() as shape PanelArray
+  state placed: string[] = ["1", "2", "3"]
+  derive count = placed.length
+  derive capacity = count * array.maxWattage
+  derive output = sum(array.slots.filter(s => placed.includes(s.id)).map(s => panelOutput(array.maxWattage, s.efficiency)))
+
+  action toggle(id: string)
+    if placed.includes(id)
+      placed = placed.filter(p => p != id)
+    else
+      placed = placed.concat([id])
+  action clear
+    placed = []
+
+  view
+    main testId="root" navigationKey=`${top(nav).id}` width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        column navigationKey=`${e.id}` navigationScroll="content" position="absolute" inset=0 display="flex" flex-direction="column"
+          header display="flex" align-items="center"
+            text "Array layout" role="heading" aria-level=1 flex=1
+            button press=clear disabled=(count == 0) testId="clear"
+              text "Clear"
+          scroll id="content" flex=1 min-height=0 padding=16
+            column gap=16 max-width="40rem" width="100%" margin="0 auto"
+              row gap=12
+                column flex=1 padding=12 border-radius=12 background-color="-exact-secondary-background"
+                  text "Panels" font="-exact-footnote" color="-exact-secondary-label"
+                  text `${count}` font="-exact-title1" testId="count"
+                column flex=1 padding=12 border-radius=12 background-color="-exact-secondary-background"
+                  text "Capacity" font="-exact-footnote" color="-exact-secondary-label"
+                  text formatWattage(capacity) font="-exact-title1" testId="capacity"
+                column flex=1 padding=12 border-radius=12 background-color="-exact-secondary-background"
+                  text "Output" font="-exact-footnote" color="-exact-secondary-label"
+                  text formatWattage(output) font="-exact-title1" testId="output"
+              column display="grid" grid-template-columns="repeat(7, 1fr)" gap=6
+                for s in array.slots key=s.id
+                  button press=toggle(s.id) aria-pressed=(placed.includes(s.id) ? "true" : "false") aria-label=`Slot ${s.id}, inverter ${s.inverterId}, ${s.efficiency}%` testId=`slot-${s.id}` aspect-ratio="0.5" border-radius=4 background-color=(placed.includes(s.id) ? "-exact-system-blue" : "-exact-secondary-background") display="flex" align-items="center" justify-content="center"
+                    text (placed.includes(s.id) ? `${s.efficiency}%` : "+") font="-exact-caption1" color=(placed.includes(s.id) ? "-exact-background" : "-exact-secondary-label")
+              text "Tap a slot to place or remove a panel. Each slot feeds one of the default inverters (95% to 0%), so output is below capacity." font="-exact-footnote" color="-exact-secondary-label"

@@ -1,0 +1,20 @@
+{
+  "$schema": "../exact/scripts/app.schema.json",
+  "name": "Exact Solar Trial",
+  "short_name": "Exact Solar Trial",
+  "id": "com.example.exact-solar-trial-4c9ea2",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "com.example.exact-solar-trial-4c9ea2",
+    "name": "Exact Solar Trial"
+  },
+  "host": {
+    "web": {}
+  },
+  "deploy": {
+    "store": {
+      "web": "0"
+    }
+  }
+}
