@@ -1,42 +1,70 @@
-test "layout: placing and removing panels updates the totals"
-  expect text "count" == "3"
-  expect text "capacity" == "1.3kW"
-  expect text "output" == "1.2kW"
-  tap "slot-4"
-  tap "slot-13"
-  expect text "count" == "5"
-  expect text "capacity" == "2.1kW"
-  expect text "output" == "1.6kW"
-  tap "slot-1"
-  expect text "count" == "4"
-  tap "clear"
-  expect text "count" == "0"
-  expect text "output" == "0W"
+test "layout editor: select, drag with snap, add, rotate, zoom"
+  clock +5
+  expect tree has "panel-10"
+  expect text "unlinked-count" == "2"
+  expect tree missing "rotate-panel"
+  tap "panel-1"
+  expect tree has "rotate-panel"
+  tap "panel-1" drag 0 300
+  clock settle
+  expect state layout.panels.9.id == "panel-1"
+  expect state layout.panels.9.x == 33
+  expect state layout.panels.9.y == 526
+  tap "rotate-panel"
+  clock settle
+  expect state layout.panels.9.rotation == 90
+  tap "add-panel"
+  clock settle
+  expect text "unlinked-count" == "3"
+  tap "zoom-out"
+  expect enabled "zoom-in"
+  tap "zoom-out"
+  expect disabled "zoom-out"
 
-test "production: totals and a panel opens its inverter"
-  tap "slot-8"
+test "panel details: link an inverter to an unlinked panel"
+  clock +5
+  tap "panel-9"
+  tap "link-panel"
+  clock settle
+  tap "pick-9"
+  clock settle
+  expect text "unlinked-count" == "1"
+
+test "production: total, per-panel wattage and the linked inverter"
+  clock +5
   tap "open-production"
-  expect text "total-output" == "1.6kW"
-  expect tree has "prod-8"
-  expect tree missing "prod-9"
-  tap "prod-8"
-  expect text "efficiency" == "75%"
+  clock settle
+  expect text "total-output" == "3.2kW"
+  tap "prod-panel-8"
+  clock settle
+  expect text "prod-efficiency" == "75%"
   back
-  back
-  expect text "count" == "4"
+  clock settle
+  tap "prod-panel-10"
+  clock settle
+  expect tree has "no-inverter"
 
-test "configuration: wattage and inverter efficiency feed the totals"
+test "configuration: wattage, roof, and the micro-inverter sheet"
+  clock +5
   tap "open-config"
+  clock settle
   expect tree has "inverter-14"
+  tap "roof-shed"
+  clock settle
+  type "tilt-slider" "10"
+  clock settle
+  expect text "tilt" == "Tilt Angle: 10°"
   tap "inverter-10"
+  clock settle
   expect text "efficiency" == "62%"
-  tap "eff-up"
-  expect text "efficiency" == "67%"
-  tap "eff-down"
-  tap "eff-down"
-  expect text "efficiency" == "57%"
-  back
+  type "efficiency-slider" "70"
+  expect text "efficiency" == "70%"
+  tap "inverter-save"
+  clock settle
   type "wattage" "400"
+  clock settle
   back
-  expect text "capacity" == "1.2kW"
-  expect text "output" == "1.1kW"
+  clock settle
+  tap "open-production"
+  clock settle
+  expect text "total-output" == "3.0kW"

@@ -1,8 +1,10 @@
-// A web-only trial port of four solar-array-simulator screens: the array layout
-// (custom.tsx), production (production.tsx), configuration (config.tsx) and inverter
-// details (inverter-details.tsx). Wattage and inverter efficiencies are the repo's
-// defaults (configStore.ts). Per-panel output is getEffectiveOutput's no-location
-// formula without its ±5% noise, rounded as useProductionMonitor does.
+// A web-only port of solar-array-simulator's main screens to Exact:
+//   Layout Editor (custom.tsx, SolarPanelCanvas, CustomChrome, ZoomControls)
+//   Panel Details sheet (panel-details.tsx, PanelDetailsForm)
+//   Production (production.tsx, ProductionCanvas, ProductionPanel)
+//   Configuration (config.tsx) and its Micro-inverter sheet (inverter-details.tsx)
+// Logic (snap, collision, free position, rotation, output) lives in app.ts, ported
+// from the repo's utils. Panel art is BasePanelShape/SolarPanel/ProductionPanel in SVG.
 shape Inverter
   id: string
   serialNumber: string
@@ -10,175 +12,399 @@ shape Inverter
 
 shape Config
   defaultMaxWattage: number
+  panelTiltAngle: number
+  roofType: string
   inverters: Inverter[]
+
+shape Panel
+  id: string
+  x: number
+  y: number
+  rotation: number
+  inverterId: string
+
+shape Panels
+  panels: Panel[]
+
+shape PanelWatt
+  id: string
+  wattage: number
+
+shape Production
+  total: number
+  panels: PanelWatt[]
+
+shape Viewport
+  width: number
+  height: number
 
 shape Reply
   ok: bool
 
-// All routes sit under the GitHub Pages subpath, so a reload of a pushed screen on the
+// Every route sits under the GitHub Pages subpath, so a reload of a pushed screen on the
 // live demo finds it. Exact's router has no base path, and `/` or a trailing slash
-// matches nothing here. The router puts `notfound` on top of the layout, so it steps back to the layout at once.
+// matches nothing here: `notfound` lands on top of the layout and steps back at once.
 routes nav
   layout "/exact-solar-array-trial"
+    panel "/exact-solar-array-trial/panel/:id"
     production "/exact-solar-array-trial/production"
+      linked "/exact-solar-array-trial/production/panel/:id"
     config "/exact-solar-array-trial/config"
       inverter "/exact-solar-array-trial/config/inverter/:id"
   notfound
 
 // formatters.ts formatWattage
 fn formatWattage(watts: number): string = watts >= 1000 ? `${(watts / 1000).toFixed(1)}kW` : `${watts}W`
-
-// solarCalculations.ts getEffectiveOutput, no location, noise left out; rounded per panel
-fn panelOutput(maxWattage: number, efficiency: number): number = round(maxWattage * efficiency / 100)
-
-// InverterSection's supporting text
+// zoomConstants.ts ZOOM_LEVELS
+fn zoomScale(i: number): number = i == 0 ? 1 : i == 1 ? 0.66 : 0.4
+// panelUtils.ts getPanelDimensions
+fn panelW(rotation: number): number = rotation == 90 ? 120 : 60
+fn panelH(rotation: number): number = rotation == 90 ? 60 : 120
+// useCanvasTransform: translate(c) scale(s) translate(-c + viewport)
+fn toScreen(world: number, viewport: number, c: number, s: number): number = c + s * (world + viewport - c)
+fn wattOf(ws: PanelWatt[], id: string): number = sum(ws.filter(w => w.id == id).map(w => w.wattage))
+fn serialOf(invs: Inverter[], id: string): string = invs.filter(i => i.id == id).map(i => i.serialNumber).join("")
+fn effOf(invs: Inverter[], id: string): number = sum(invs.filter(i => i.id == id).map(i => i.efficiency))
+// RoofTypePicker labels
+fn roofLabel(r: string): string = r == "gable" ? "Gable" : r == "hip" ? "Hip" : r == "flat" ? "Flat" : "Shed"
 fn efficiencyText(e: number): string = `${round(e)}% efficiency`
-
-// Compass/serial display in the RN app shows XXXX-XXXX
-fn serialText(s: string): string = `${s.slice(0, 4)}-${s.slice(4)}`
-
-style tile
-  flex=1
-  padding=12
-  border-radius=12
-  background-color="-exact-secondary-background"
 
 component SolarApp
   resource config = config() as shape Config
-  mutation saved as shape Reply queue refreshes config
-  state placed: string[] = ["1", "2", "3"]
+  resource layout = panels() as shape Panels
+  resource viewport = exactViewport() as shape Viewport
+  state tick = 0
+  resource production = production(tick) as shape Production
+  mutation saved as shape Reply queue refreshes config, layout, production
+  mutation dropped as shape Reply queue refreshes layout, production then endDrag
+  state selected = ""
+  state dragId = ""
+  state dragDx = 0
+  state dragDy = 0
+  state vx = 0
+  state vy = 0
+  state zoom = 0
   state wattageDraft = "430"
-  derive placedInverters = config.inverters.filter(i => placed.includes(i.id))
-  derive count = placed.length
-  derive capacity = count * config.defaultMaxWattage
-  derive output = sum(placedInverters.map(i => panelOutput(config.defaultMaxWattage, i.efficiency)))
+  state serialDraft = ""
+  state effDraft = 95
+  derive scale = zoomScale(zoom)
+  derive cx = viewport.width / 2
+  derive cy = (viewport.height - 52) / 2
+  derive panels = layout.panels
+  derive unlinked = panels.filter(p => p.inverterId == "").length
+  derive selectedPanels = panels.filter(p => p.id == selected)
 
   task fixLocation when top(nav).name == "notfound"
     after(1, goHome)
+  // useProductionMonitor: wattages refresh every second
+  task refresh when top(nav).name == "production"
+    every(1000, nextTick)
+
   action goHome
     nav = back(nav)
   action back
     nav = back(nav)
   action follow(url: string)
     nav = go(nav, url)
+  action nextTick
+    tick = tick + 1
+
+  // ---- canvas: SolarPanelCanvas pan + tap -----------------------------------------
+  action select(id: string)
+    selected = id
+  action deselect
+    selected = ""
+  action drag(id: string, dx: number, dy: number)
+    if dragId == id
+      dragDx = dragDx + dx / scale
+      dragDy = dragDy + dy / scale
+    else
+      dragId = id
+      dragDx = dx / scale
+      dragDy = dy / scale
+      selected = id
+  action drop(id: string, x: number, y: number, rvx: number, rvy: number)
+    send dropped = dropPanel(id, x + dragDx, y + dragDy)
+  action endDrag
+    dragId = ""
+    dragDx = 0
+    dragDy = 0
+  action panView(dx: number, dy: number)
+    vx = vx + dx / scale
+    vy = vy + dy / scale
+  action zoomIn
+    zoom = max(0, zoom - 1)
+  action zoomOut
+    zoom = min(2, zoom + 1)
+  // useCanvasEditor handleSnapToOrigin: centre the first panel
+  action snapToOrigin
+    if panels.length > 0
+      vx = cx - sum(panels.slice(0, 1).map(p => p.x + panelW(p.rotation) / 2))
+      vy = cy - sum(panels.slice(0, 1).map(p => p.y + panelH(p.rotation) / 2))
+    else
+      vx = 0
+      vy = 0
+
+  // ---- bottom toolbar --------------------------------------------------------------
+  action addPanel
+    send saved = addPanel(viewport.width, viewport.height - 52, vx, vy)
+  action linkSelected
+    nav = push(nav, path("panel", selected))
+  action rotateSelected
+    send saved = rotatePanel(selected)
+  action deleteSelected
+    send saved = removePanel(selected)
+    selected = ""
+  action link(panelId: string, inverterId: string)
+    send saved = linkPanel(panelId, inverterId)
+    nav = back(nav)
   action openProduction
     nav = push(nav, path("production"))
+  action openLinked(id: string)
+    nav = push(nav, path("linked", id))
+
+  // ---- configuration -------------------------------------------------------------
   action openConfig
     wattageDraft = `${config.defaultMaxWattage}`
     nav = push(nav, path("config"))
-  action openInverter(id: string)
-    nav = push(nav, path("inverter", id))
-
-  action toggle(id: string)
-    if placed.includes(id)
-      placed = placed.filter(p => p != id)
-    else
-      placed = placed.concat([id])
-  action clear
-    placed = []
   action editWattage(v: string)
     wattageDraft = v
     send saved = setWattage(v)
-  action nudge(id: string, efficiency: number)
-    send saved = setEfficiency(id, efficiency)
+  action pickRoof(r: string)
+    send saved = setRoof(r)
+  action tilt(v: number)
+    send saved = setTilt(v)
+  action openInverter(id: string, serial: string, eff: number)
+    serialDraft = serial
+    effDraft = eff
+    nav = push(nav, path("inverter", id))
+  action editSerial(v: string)
+    serialDraft = v
+  action editEff(v: number)
+    effDraft = v
+  action saveInverter(id: string)
+    send saved = saveInverter(id, serialDraft.trim(), effDraft)
+    nav = back(nav)
+  action removeInverter(id: string)
+    send saved = deleteInverter(id)
 
   view
     main testId="root" navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow width="100%" height="100%"
       for e in stack(nav) key=e.id
         if e.name == "layout" or e.name == "notfound"
-          column navigationKey=`${e.id}` navigationScroll="layout-scroll" position="absolute" inset=0 display="flex" flex-direction="column"
-            header display="flex" align-items="center"
-              text "Array layout" role="heading" aria-level=1 flex=1
-              button press=clear disabled=(count == 0) testId="clear"
-                text "Clear"
-            scroll id="layout-scroll" flex=1 min-height=0 padding=16
-              column gap=16 max-width="40rem" width="100%" margin="0 auto"
-                row gap=12
-                  column class=tile
-                    text "Panels" font="-exact-footnote" color="-exact-secondary-label"
-                    text `${count}` font="-exact-title1" testId="count"
-                  column class=tile
-                    text "Capacity" font="-exact-footnote" color="-exact-secondary-label"
-                    text formatWattage(capacity) font="-exact-title1" testId="capacity"
-                  column class=tile
-                    text "Output" font="-exact-footnote" color="-exact-secondary-label"
-                    text formatWattage(output) font="-exact-title1" testId="output"
-                column display="grid" grid-template-columns="repeat(7, 1fr)" gap=6
-                  for s in config.inverters key=s.id
-                    button press=toggle(s.id) aria-pressed=(placed.includes(s.id) ? "true" : "false") aria-label=`Slot ${s.id}, inverter ${serialText(s.serialNumber)}, ${s.efficiency}%` testId=`slot-${s.id}` aspect-ratio="0.5" border-radius=4 background-color=(placed.includes(s.id) ? "-exact-system-blue" : "-exact-secondary-background") display="flex" align-items="center" justify-content="center"
-                      text (placed.includes(s.id) ? `${s.efficiency}%` : "+") font="-exact-caption1" color=(placed.includes(s.id) ? "-exact-background" : "-exact-secondary-label")
-                text "Tap a slot to place or remove a panel. Each slot feeds one micro-inverter, so output is below capacity." font="-exact-footnote" color="-exact-secondary-label"
-                row gap=12
-                  button press=openProduction buttonStyle="filled" flex=1 testId="open-production"
-                    text "Production"
-                  button press=openConfig buttonStyle="bordered" flex=1 testId="open-config"
-                    text "Configuration"
+          column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center" gap=4
+              text "Layout Editor" role="heading" aria-level=1 flex=1
+              button press=openProduction aria-label="Production" testId="open-production"
+                image "symbol:chart"
+              button press=openConfig aria-label="Configuration" testId="open-config"
+                image "symbol:settings"
+              // CustomHeaderToolbar's link: a count of unlinked panels, not a control
+              box role="status" aria-label=`Unlinked panels: ${unlinked}` testId="unlinked" position="relative" padding=8
+                image "symbol:link" aria-hidden=true
+                if unlinked > 0
+                  text `${unlinked}` testId="unlinked-count" position="absolute" top=-2 right=-4 min-width=18 height=18 padding-left=5 padding-right=5 border-radius=9 background-color="-exact-system-red" color="#ffffff" font-size=11 font-weight=700 text-align="center" line-height="18px"
+              button press=snapToOrigin aria-label="Snap to origin" testId="snap"
+                svg width=22 height=22 viewBox="0 0 24 24" aria-hidden=true
+                  circle cx=12 cy=12 r=7 fill="none" stroke="currentColor" stroke-width=1.8
+                  line x1=12 y1=2 x2=12 y2=7 stroke="currentColor" stroke-width=1.8
+                  line x1=12 y1=17 x2=12 y2=22 stroke="currentColor" stroke-width=1.8
+                  line x1=2 y1=12 x2=7 y2=12 stroke="currentColor" stroke-width=1.8
+                  line x1=17 y1=12 x2=22 y2=12 stroke="currentColor" stroke-width=1.8
+            box testId="canvas" flex=1 min-height=0 position="relative" overflow="hidden" touch-action="none" background-color="light-dark(#f9fafb, #111827)" pan=panView press=deselect
+              for p in panels key=p.id
+                box testId=p.id aria-label=`Panel ${p.id}${p.inverterId == "" ? ", unlinked" : ", linked"}` touch-action="none" position="absolute" left=(toScreen(p.x + (dragId == p.id ? dragDx : 0), vx, cx, scale) - 4 * scale) top=(toScreen(p.y + (dragId == p.id ? dragDy : 0), vy, cy, scale) - 4 * scale) width=((panelW(p.rotation) + 8) * scale) height=((panelH(p.rotation) + 8) * scale) pan=drag(p.id) panrelease=drop(p.id, p.x, p.y) press=select(p.id)
+                  PanelArt(rotation=p.rotation, linked=(p.inverterId != ""), selected=(selected == p.id), label="")
+              ZoomControls(index=zoom, zoomIn=zoomIn, zoomOut=zoomOut)
+              // CustomBottomToolbar: Add always; Link, Rotate and Delete while a panel is selected
+              row position="absolute" bottom=24 left=0 right=0 justify-content="center"
+                row gap=4 padding=6 border-radius=28 background-color="light-dark(#ffffff, #1f2937)" box-shadow="0 2px 12px rgba(0, 0, 0, 0.12)"
+                  button press=addPanel aria-label="Add panel" testId="add-panel" buttonStyle="borderless"
+                    image "symbol:add"
+                  if selected != ""
+                    button press=linkSelected aria-label="Link inverter" testId="link-panel" buttonStyle="borderless"
+                      image "symbol:link"
+                    button press=rotateSelected aria-label="Rotate panel" testId="rotate-panel" appearance="none" width=44 height=44 display="flex" align-items="center" justify-content="center" color="AccentColor"
+                      svg width=20 height=20 viewBox="0 0 24 24" aria-hidden=true
+                        path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width=2 stroke-linecap="round"
+                        path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width=2 stroke-linecap="round" stroke-linejoin="round"
+                    button press=deleteSelected aria-label="Delete panel" testId="delete-panel" buttonStyle="borderless"
+                      image "symbol:delete"
+        if e.name == "panel"
+          for p in panels.filter(q => q.id == e.params.id) key=p.id
+            column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="panel-list" position="absolute" inset=0 display="flex" flex-direction="column"
+              header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+                button id="back" press=back aria-label="Close" testId="panel-close"
+                  image "symbol:close"
+                text "Panel Details" role="heading"
+                box width=44
+              list id="panel-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                if p.inverterId != ""
+                  section
+                    header
+                      text "Linked Inverter"
+                    row
+                      text "Serial Number" flex=1
+                      text serialOf(config.inverters, p.inverterId) color="-exact-secondary-label" testId="linked-serial"
+                    row
+                      text "Efficiency" flex=1
+                      text `${round(effOf(config.inverters, p.inverterId))}%` color="-exact-secondary-label"
+                    button press=link(p.id, "") destructive=true testId="unlink"
+                      text "Unlink Inverter"
+                section
+                  header
+                    text "Available Inverters"
+                  for i in config.inverters.filter(v => not panels.map(q => q.inverterId).includes(v.id)) key=i.id
+                    button press=link(p.id, i.id) testId=`pick-${i.id}`
+                      column flex=1 min-width=0 align-items="flex-start"
+                        text i.serialNumber
+                        text efficiencyText(i.efficiency) font="-exact-footnote" color="-exact-secondary-label"
+                      image "symbol:forward-chevron"
+                  footer
+                    text "Select a micro-inverter to link to this panel."
         if e.name == "production"
-          column navigationKey=`${e.id}` navigationScroll="production-scroll" position="absolute" inset=0 display="flex" flex-direction="column"
+          column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column" background-color="light-dark(#f9fafb, #111827)"
             header display="flex" align-items="center"
-              text "Production" role="heading" aria-level=1 flex=1
-            scroll id="production-scroll" flex=1 min-height=0 padding=16
-              column gap=16 max-width="40rem" width="100%" margin="0 auto"
-                column class=tile align-items="center"
-                  text "Total Array Output" font="-exact-footnote" color="-exact-secondary-label"
-                  text formatWattage(output) font="-exact-large-title" testId="total-output"
-                if count == 0
-                  text "No panels placed. Go back to the layout and tap a slot." color="-exact-secondary-label" testId="production-empty"
-                column display="grid" grid-template-columns="repeat(7, 1fr)" gap=6
-                  for i in placedInverters key=i.id
-                    button press=openInverter(i.id) aria-label=`Panel ${i.id}, ${formatWattage(panelOutput(config.defaultMaxWattage, i.efficiency))}` testId=`prod-${i.id}` aspect-ratio="0.5" border-radius=4 background-color="-exact-secondary-background" display="flex" flex-direction="column" align-items="center" justify-content="center" gap=2
-                      text `${panelOutput(config.defaultMaxWattage, i.efficiency)}W` font="-exact-caption1" font-weight=600
-                      text `#${i.id}` font="-exact-caption2" color="-exact-secondary-label"
-                text "Tap a panel to open its micro-inverter." font="-exact-footnote" color="-exact-secondary-label"
+              text "" role="heading" aria-level=1 flex=1
+              button popovertarget="production-menu" aria-label="More" testId="production-more"
+                image "symbol:ellipsis"
+              column id="production-menu" popover="auto" role="menu"
+                button press=openConfig popovertarget="production-menu" popovertargetaction="hide" testId="edit-config"
+                  text "Edit Configuration"
+            column margin-left=16 margin-right=16 margin-top=8 padding=20 border-radius=16 border-width=1 border-style="solid" border-color="light-dark(#e5e7eb, #374151)" background-color="light-dark(#ffffff, #000000)" box-shadow="0 2px 8px rgba(0, 0, 0, 0.08)"
+              text "Total Array Output" font-size=13 font-weight=600 letter-spacing=0.3 text-transform="uppercase" margin-bottom=8 color="light-dark(#6b7280, #9ca3af)"
+              text formatWattage(production.total) font-size=48 font-weight=700 font-variant-numeric="tabular-nums" testId="total-output"
+            box testId="production-canvas" flex=1 min-height=0 position="relative" overflow="hidden" touch-action="none" pan=panView
+              for p in panels key=p.id
+                box testId=`prod-${p.id}` aria-label=`Panel ${p.id}, ${formatWattage(wattOf(production.panels, p.id))}` position="absolute" left=(toScreen(p.x, vx, cx, scale) - 4 * scale) top=(toScreen(p.y, vy, cy, scale) - 4 * scale - 120) width=((panelW(p.rotation) + 8) * scale) height=((panelH(p.rotation) + 8) * scale) press=openLinked(p.id)
+                  PanelArt(rotation=p.rotation, linked=(p.inverterId != ""), selected=false, label=`${wattOf(production.panels, p.id)}W`)
+              ZoomControls(index=zoom, zoomIn=zoomIn, zoomOut=zoomOut)
+        if e.name == "linked"
+          for p in panels.filter(q => q.id == e.params.id) key=p.id
+            column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="linked-list" position="absolute" inset=0 display="flex" flex-direction="column"
+              header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+                button id="back" press=back aria-label="Close" testId="linked-close"
+                  image "symbol:close"
+                text "Panel Details" role="heading"
+                box width=44
+              list id="linked-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                section
+                  header
+                    text "Linked Inverter"
+                  if p.inverterId == ""
+                    row
+                      text "No inverter linked to this panel." color="-exact-secondary-label" testId="no-inverter"
+                  else
+                    row
+                      text "Serial Number" flex=1
+                      text serialOf(config.inverters, p.inverterId) color="-exact-secondary-label" testId="prod-serial"
+                    row
+                      text "Efficiency" flex=1
+                      text `${round(effOf(config.inverters, p.inverterId))}%` color="-exact-secondary-label" testId="prod-efficiency"
         if e.name == "config"
           column navigationKey=`${e.id}` navigationScroll="config-list" position="absolute" inset=0 display="flex" flex-direction="column"
             header display="flex" align-items="center"
               text "Configuration" role="heading" aria-level=1 flex=1
+              button press=openInverter("", "", 95) aria-label="Add inverter" testId="add-inverter"
+                image "symbol:add"
             list id="config-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
               section
                 header
                   text "Panel Settings"
-                row gap=8 align-items="center"
-                  text "Default Production" flex=1
-                  input value=wattageDraft input=editWattage inputmode="numeric" placeholder="430" aria-label="Default production in watts" testId="wattage" width="5rem"
-                  text "W"
+                row gap=8 align-items="center" flex-wrap="nowrap"
+                  text "Default Production" flex=1 min-width=0
+                  input value=wattageDraft input=editWattage inputmode="numeric" placeholder="430" aria-label="Default production" testId="wattage" width="5rem" flex-shrink=0
+                  text "W" color="-exact-secondary-label" testId="text-input-unit"
                 footer
                   text "Configure the default wattage each micro-inverter and solar panel will produce at maximum production."
               section
                 header
+                  text "Roof"
+                row role="radiogroup" aria-label="Roof type"
+                  for r in ["gable", "hip", "flat", "shed"] key=r
+                    button role="radio" aria-checked=(config.roofType == r) press=pickRoof(r) testId=`roof-${r}` flex=1
+                      text roofLabel(r)
+                row gap=12 align-items="center"
+                  text `Tilt Angle: ${round(config.panelTiltAngle)}°` testId="tilt"
+                  input type="range" min=0 max=90 step=5 value=config.panelTiltAngle input=tilt aria-label="Tilt angle" testId="tilt-slider" flex=1
+                footer
+                  text "Select your roof shape for the 3D simulation view."
+              section
+                header
                   text `Micro-inverters (${config.inverters.length})`
                 for i in config.inverters key=i.id
-                  link href=path("inverter", i.id) testId=`inverter-${i.id}`
-                    column flex=1 min-width=0
-                      text serialText(i.serialNumber)
+                  button press=openInverter(i.id, i.serialNumber, i.efficiency) delete=removeInverter(i.id) testId=`inverter-${i.id}`
+                    column flex=1 min-width=0 align-items="flex-start"
+                      text i.serialNumber
                       text efficiencyText(i.efficiency) font="-exact-footnote" color="-exact-secondary-label"
                     image "symbol:forward-chevron"
-                footer
-                  text "Tap to edit efficiency."
         if e.name == "inverter"
-          for i in config.inverters.filter(x => x.id == e.params.id) key=i.id
-            column navigationKey=`${e.id}` navigationScroll="inverter-list" position="absolute" inset=0 display="flex" flex-direction="column"
-              header display="flex" align-items="center"
-                text "Inverter Details" role="heading" aria-level=1 flex=1
-              list id="inverter-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
-                section
-                  header
-                    text "Details"
-                  row
-                    text "Serial Number" flex=1
-                    text serialText(i.serialNumber) color="-exact-secondary-label" testId="serial"
-                section
-                  header
-                    text "Efficiency"
-                  row gap=8 align-items="center"
-                    text "Current" flex=1
-                    button press=nudge(i.id, i.efficiency - 5) disabled=(i.efficiency <= 0) aria-label="Decrease efficiency" testId="eff-down"
-                      text "−5"
-                    text `${round(i.efficiency)}%` font-variant-numeric="tabular-nums" min-width="3rem" text-align="center" testId="efficiency"
-                    button press=nudge(i.id, i.efficiency + 5) disabled=(i.efficiency >= 100) aria-label="Increase efficiency" testId="eff-up"
-                      text "+5"
-                  row
-                    text "Panel output" flex=1
-                    text formatWattage(panelOutput(config.defaultMaxWattage, i.efficiency)) color="-exact-secondary-label" testId="inverter-output"
-                  footer
-                    text "Efficiency scales every panel on this micro-inverter. The RN app uses a slider; this uses 5% steps."
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="inverter-list" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+              button id="back" press=back aria-label="Cancel" testId="inverter-cancel"
+                image "symbol:close"
+              text (e.params.id == "new" ? "Add Micro-inverter" : "Edit Micro-inverter") role="heading"
+              button press=saveInverter(e.params.id == "new" ? "" : e.params.id) disabled=(serialDraft.trim() == "") aria-label="Save" testId="inverter-save"
+                image "symbol:checkmark"
+            list id="inverter-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+              section
+                header
+                  text "Details"
+                row gap=12 align-items="center"
+                  text "Serial Number"
+                  input value=serialDraft input=editSerial placeholder="Enter serial number" aria-label="Serial number" testId="inverter-serial-input" flex=1 min-width=0
+              section
+                header
+                  text "Efficiency"
+                row
+                  text "Current" flex=1
+                  text `${round(effDraft)}%` color="-exact-secondary-label" testId="efficiency"
+                input type="range" min=0 max=100 step=1 value=effDraft input=editEff aria-label="Efficiency" testId="efficiency-slider"
+                footer
+                  text (e.params.id == "new" ? "Set the expected efficiency for this micro-inverter." : "Adjust for shading, dirt, or other obstructions.")
+
+// BasePanelShape + SolarPanel + ProductionPanel, drawn in SVG. World units: a 60 x 120
+// panel (90° turns it 120 x 60), 8 radius, 2 stroke, one centre line and three cross
+// lines at 25/50/75%, theme.base.ts panel colours; selection is a 3 px amber ring.
+component PanelArt
+  props
+    rotation: number
+    linked: bool
+    selected: bool
+    label: string
+  view
+    svg width="100%" height="100%" viewBox=(rotation == 90 ? "-4 -4 128 68" : "-4 -4 68 128") overflow="visible" aria-hidden=true
+      if selected
+        rect x=-3 y=-3 width=(panelW(rotation) + 6) height=(panelH(rotation) + 6) rx=11 fill="none" stroke="#fbbf24" stroke-width=3
+      rect x=0 y=0 width=panelW(rotation) height=panelH(rotation) rx=8 fill=(linked ? "#3b82f6" : "#9ca3af")
+      rect x=0 y=0 width=panelW(rotation) height=panelH(rotation) rx=8 fill="none" stroke=(linked ? "#1d4ed8" : "#6b7280") stroke-width=2
+      if rotation == 90
+        line x1=8 y1=30 x2=112 y2=30 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+        line x1=30 y1=8 x2=30 y2=52 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+        line x1=60 y1=8 x2=60 y2=52 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+        line x1=90 y1=8 x2=90 y2=52 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+      else
+        line x1=30 y1=8 x2=30 y2=112 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+        line x1=8 y1=30 x2=52 y2=30 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+        line x1=8 y1=60 x2=52 y2=60 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+        line x1=8 y1=90 x2=52 y2=90 stroke=(linked ? "#60a5fa" : "#d1d5db") stroke-width=2
+      if label != ""
+        rect x=(panelW(rotation) / 2 - label.length * 3.4 - 4) y=(panelH(rotation) / 2 - 10) width=(label.length * 6.8 + 8) height=18 rx=4 fill="rgba(0, 0, 0, 0.6)"
+        text label x=(panelW(rotation) / 2) y=(panelH(rotation) / 2 + 4) text-anchor="middle" font-size=11 font-weight=700 fill="#ffffff"
+
+// ZoomControls.tsx: a 44-wide card, +, one line per zoom level (the current one dark), −.
+component ZoomControls
+  props
+    index: number
+    zoomIn: action
+    zoomOut: action
+  view
+    column position="absolute" right=16 bottom=96 width=44 border-radius=12 overflow="hidden" background-color="light-dark(#ffffff, #000000)" box-shadow="0 2px 8px rgba(0, 0, 0, 0.1)"
+      button press=zoomIn disabled=(index == 0) aria-label="Zoom in" testId="zoom-in" appearance="none" width=44 height=44 display="flex" align-items="center" justify-content="center" opacity=(index == 0 ? 0.5 : 1)
+        image "symbol:add" font-size=22 color=(index == 0 ? "light-dark(#d1d5db, #4b5563)" : "light-dark(#111827, #ffffff)")
+      column width=44 padding-top=8 padding-bottom=8 align-items="center" gap=5 testId="zoom-level" aria-label=`Zoom level ${index + 1} of 3`
+        for i in [0, 1, 2] key=i
+          box width=20 height=2 border-radius=1 background-color=(i == index ? "light-dark(#111827, #ffffff)" : "light-dark(#d1d5db, #4b5563)")
+      button press=zoomOut disabled=(index == 2) aria-label="Zoom out" testId="zoom-out" appearance="none" width=44 height=44 display="flex" align-items="center" justify-content="center" opacity=(index == 2 ? 0.5 : 1)
+        image "symbol:minus" font-size=22 color=(index == 2 ? "light-dark(#d1d5db, #4b5563)" : "light-dark(#111827, #ffffff)")
+
