@@ -1,4 +1,4 @@
-test "placing and removing panels updates the totals"
+test "layout: placing and removing panels updates the totals"
   expect text "count" == "3"
   expect text "capacity" == "1.3kW"
   expect text "output" == "1.2kW"
@@ -12,3 +12,31 @@ test "placing and removing panels updates the totals"
   tap "clear"
   expect text "count" == "0"
   expect text "output" == "0W"
+
+test "production: totals and a panel opens its inverter"
+  tap "slot-8"
+  tap "open-production"
+  expect text "total-output" == "1.6kW"
+  expect tree has "prod-8"
+  expect tree missing "prod-9"
+  tap "prod-8"
+  expect text "efficiency" == "75%"
+  back
+  back
+  expect text "count" == "4"
+
+test "configuration: wattage and inverter efficiency feed the totals"
+  tap "open-config"
+  expect tree has "inverter-14"
+  tap "inverter-10"
+  expect text "efficiency" == "62%"
+  tap "eff-up"
+  expect text "efficiency" == "67%"
+  tap "eff-down"
+  tap "eff-down"
+  expect text "efficiency" == "57%"
+  back
+  type "wattage" "400"
+  back
+  expect text "capacity" == "1.2kW"
+  expect text "output" == "1.1kW"

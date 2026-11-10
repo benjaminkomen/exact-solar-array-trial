@@ -11,8 +11,8 @@ rm -rf dist
 bun exact.mjs web-build --out dist
 
 # Exact writes <base href="/">; its assets are relative, so pointing the base at the
-# Pages subpath is all a static host needs. The `notfound` route in app.contract draws
-# the screen at that path, since Exact's router has no base path.
+# Pages subpath is all a static host needs. Routes live under the subpath, and the
+# `notfound` route in app.contract steps back to the layout from `/` or a trailing slash.
 for page in index.html shell.html; do
   sed -i.bak "s|<base href=\"/\">|<base href=\"$BASE\">|" "dist/$page" && rm "dist/$page.bak"
 done

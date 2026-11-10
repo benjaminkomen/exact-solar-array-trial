@@ -1,33 +1,73 @@
-// A one-screen slice of solar-array-simulator's array layout: tap a slot to place
-// or remove a panel; the totals follow. Wattage and inverter efficiencies are the
-// repo's defaults (configStore.ts); the per-panel output is getEffectiveOutput's
-// no-location formula without its ±5% noise, rounded as useProductionMonitor does.
-shape Slot
+// A web-only trial port of four solar-array-simulator screens: the array layout
+// (custom.tsx), production (production.tsx), configuration (config.tsx) and inverter
+// details (inverter-details.tsx). Wattage and inverter efficiencies are the repo's
+// defaults (configStore.ts). Per-panel output is getEffectiveOutput's no-location
+// formula without its ±5% noise, rounded as useProductionMonitor does.
+shape Inverter
   id: string
-  inverterId: string
+  serialNumber: string
   efficiency: number
 
-shape PanelArray
-  maxWattage: number
-  slots: Slot[]
+shape Config
+  defaultMaxWattage: number
+  inverters: Inverter[]
 
+shape Reply
+  ok: bool
+
+// All routes sit under the GitHub Pages subpath, so a reload of a pushed screen on the
+// live demo finds it. Exact's router has no base path, and `/` or a trailing slash
+// matches nothing here. The router puts `notfound` on top of the layout, so it steps back to the layout at once.
 routes nav
-  home "/"
-  // GitHub Pages serves the demo at /exact-solar-array-trial/. Exact's router has no base
-  // path and a trailing slash matches no pattern, so every unmatched location draws this screen too.
+  layout "/exact-solar-array-trial"
+    production "/exact-solar-array-trial/production"
+    config "/exact-solar-array-trial/config"
+      inverter "/exact-solar-array-trial/config/inverter/:id"
   notfound
 
 // formatters.ts formatWattage
 fn formatWattage(watts: number): string = watts >= 1000 ? `${(watts / 1000).toFixed(1)}kW` : `${watts}W`
 
+// solarCalculations.ts getEffectiveOutput, no location, noise left out; rounded per panel
 fn panelOutput(maxWattage: number, efficiency: number): number = round(maxWattage * efficiency / 100)
 
-component SolarArray
-  resource array = array() as shape PanelArray
+// InverterSection's supporting text
+fn efficiencyText(e: number): string = `${round(e)}% efficiency`
+
+// Compass/serial display in the RN app shows XXXX-XXXX
+fn serialText(s: string): string = `${s.slice(0, 4)}-${s.slice(4)}`
+
+style tile
+  flex=1
+  padding=12
+  border-radius=12
+  background-color="-exact-secondary-background"
+
+component SolarApp
+  resource config = config() as shape Config
+  mutation saved as shape Reply queue refreshes config
   state placed: string[] = ["1", "2", "3"]
+  state wattageDraft = "430"
+  derive placedInverters = config.inverters.filter(i => placed.includes(i.id))
   derive count = placed.length
-  derive capacity = count * array.maxWattage
-  derive output = sum(array.slots.filter(s => placed.includes(s.id)).map(s => panelOutput(array.maxWattage, s.efficiency)))
+  derive capacity = count * config.defaultMaxWattage
+  derive output = sum(placedInverters.map(i => panelOutput(config.defaultMaxWattage, i.efficiency)))
+
+  task fixLocation when top(nav).name == "notfound"
+    after(1, goHome)
+  action goHome
+    nav = back(nav)
+  action back
+    nav = back(nav)
+  action follow(url: string)
+    nav = go(nav, url)
+  action openProduction
+    nav = push(nav, path("production"))
+  action openConfig
+    wattageDraft = `${config.defaultMaxWattage}`
+    nav = push(nav, path("config"))
+  action openInverter(id: string)
+    nav = push(nav, path("inverter", id))
 
   action toggle(id: string)
     if placed.includes(id)
@@ -36,29 +76,109 @@ component SolarArray
       placed = placed.concat([id])
   action clear
     placed = []
+  action editWattage(v: string)
+    wattageDraft = v
+    send saved = setWattage(v)
+  action nudge(id: string, efficiency: number)
+    send saved = setEfficiency(id, efficiency)
 
   view
-    main testId="root" navigationKey=`${top(nav).id}` width="100%" height="100%"
+    main testId="root" navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow width="100%" height="100%"
       for e in stack(nav) key=e.id
-        column navigationKey=`${e.id}` navigationScroll="content" position="absolute" inset=0 display="flex" flex-direction="column"
-          header display="flex" align-items="center"
-            text "Array layout" role="heading" aria-level=1 flex=1
-            button press=clear disabled=(count == 0) testId="clear"
-              text "Clear"
-          scroll id="content" flex=1 min-height=0 padding=16
-            column gap=16 max-width="40rem" width="100%" margin="0 auto"
-              row gap=12
-                column flex=1 padding=12 border-radius=12 background-color="-exact-secondary-background"
-                  text "Panels" font="-exact-footnote" color="-exact-secondary-label"
-                  text `${count}` font="-exact-title1" testId="count"
-                column flex=1 padding=12 border-radius=12 background-color="-exact-secondary-background"
-                  text "Capacity" font="-exact-footnote" color="-exact-secondary-label"
-                  text formatWattage(capacity) font="-exact-title1" testId="capacity"
-                column flex=1 padding=12 border-radius=12 background-color="-exact-secondary-background"
-                  text "Output" font="-exact-footnote" color="-exact-secondary-label"
-                  text formatWattage(output) font="-exact-title1" testId="output"
-              column display="grid" grid-template-columns="repeat(7, 1fr)" gap=6
-                for s in array.slots key=s.id
-                  button press=toggle(s.id) aria-pressed=(placed.includes(s.id) ? "true" : "false") aria-label=`Slot ${s.id}, inverter ${s.inverterId}, ${s.efficiency}%` testId=`slot-${s.id}` aspect-ratio="0.5" border-radius=4 background-color=(placed.includes(s.id) ? "-exact-system-blue" : "-exact-secondary-background") display="flex" align-items="center" justify-content="center"
-                    text (placed.includes(s.id) ? `${s.efficiency}%` : "+") font="-exact-caption1" color=(placed.includes(s.id) ? "-exact-background" : "-exact-secondary-label")
-              text "Tap a slot to place or remove a panel. Each slot feeds one of the default inverters (95% to 0%), so output is below capacity." font="-exact-footnote" color="-exact-secondary-label"
+        if e.name == "layout" or e.name == "notfound"
+          column navigationKey=`${e.id}` navigationScroll="layout-scroll" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center"
+              text "Array layout" role="heading" aria-level=1 flex=1
+              button press=clear disabled=(count == 0) testId="clear"
+                text "Clear"
+            scroll id="layout-scroll" flex=1 min-height=0 padding=16
+              column gap=16 max-width="40rem" width="100%" margin="0 auto"
+                row gap=12
+                  column class=tile
+                    text "Panels" font="-exact-footnote" color="-exact-secondary-label"
+                    text `${count}` font="-exact-title1" testId="count"
+                  column class=tile
+                    text "Capacity" font="-exact-footnote" color="-exact-secondary-label"
+                    text formatWattage(capacity) font="-exact-title1" testId="capacity"
+                  column class=tile
+                    text "Output" font="-exact-footnote" color="-exact-secondary-label"
+                    text formatWattage(output) font="-exact-title1" testId="output"
+                column display="grid" grid-template-columns="repeat(7, 1fr)" gap=6
+                  for s in config.inverters key=s.id
+                    button press=toggle(s.id) aria-pressed=(placed.includes(s.id) ? "true" : "false") aria-label=`Slot ${s.id}, inverter ${serialText(s.serialNumber)}, ${s.efficiency}%` testId=`slot-${s.id}` aspect-ratio="0.5" border-radius=4 background-color=(placed.includes(s.id) ? "-exact-system-blue" : "-exact-secondary-background") display="flex" align-items="center" justify-content="center"
+                      text (placed.includes(s.id) ? `${s.efficiency}%` : "+") font="-exact-caption1" color=(placed.includes(s.id) ? "-exact-background" : "-exact-secondary-label")
+                text "Tap a slot to place or remove a panel. Each slot feeds one micro-inverter, so output is below capacity." font="-exact-footnote" color="-exact-secondary-label"
+                row gap=12
+                  button press=openProduction buttonStyle="filled" flex=1 testId="open-production"
+                    text "Production"
+                  button press=openConfig buttonStyle="bordered" flex=1 testId="open-config"
+                    text "Configuration"
+        if e.name == "production"
+          column navigationKey=`${e.id}` navigationScroll="production-scroll" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center"
+              text "Production" role="heading" aria-level=1 flex=1
+            scroll id="production-scroll" flex=1 min-height=0 padding=16
+              column gap=16 max-width="40rem" width="100%" margin="0 auto"
+                column class=tile align-items="center"
+                  text "Total Array Output" font="-exact-footnote" color="-exact-secondary-label"
+                  text formatWattage(output) font="-exact-large-title" testId="total-output"
+                if count == 0
+                  text "No panels placed. Go back to the layout and tap a slot." color="-exact-secondary-label" testId="production-empty"
+                column display="grid" grid-template-columns="repeat(7, 1fr)" gap=6
+                  for i in placedInverters key=i.id
+                    button press=openInverter(i.id) aria-label=`Panel ${i.id}, ${formatWattage(panelOutput(config.defaultMaxWattage, i.efficiency))}` testId=`prod-${i.id}` aspect-ratio="0.5" border-radius=4 background-color="-exact-secondary-background" display="flex" flex-direction="column" align-items="center" justify-content="center" gap=2
+                      text `${panelOutput(config.defaultMaxWattage, i.efficiency)}W` font="-exact-caption1" font-weight=600
+                      text `#${i.id}` font="-exact-caption2" color="-exact-secondary-label"
+                text "Tap a panel to open its micro-inverter." font="-exact-footnote" color="-exact-secondary-label"
+        if e.name == "config"
+          column navigationKey=`${e.id}` navigationScroll="config-list" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center"
+              text "Configuration" role="heading" aria-level=1 flex=1
+            list id="config-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+              section
+                header
+                  text "Panel Settings"
+                row gap=8 align-items="center"
+                  text "Default Production" flex=1
+                  input value=wattageDraft input=editWattage inputmode="numeric" placeholder="430" aria-label="Default production in watts" testId="wattage" width="5rem"
+                  text "W"
+                footer
+                  text "Configure the default wattage each micro-inverter and solar panel will produce at maximum production."
+              section
+                header
+                  text `Micro-inverters (${config.inverters.length})`
+                for i in config.inverters key=i.id
+                  link href=path("inverter", i.id) testId=`inverter-${i.id}`
+                    column flex=1 min-width=0
+                      text serialText(i.serialNumber)
+                      text efficiencyText(i.efficiency) font="-exact-footnote" color="-exact-secondary-label"
+                    image "symbol:forward-chevron"
+                footer
+                  text "Tap to edit efficiency."
+        if e.name == "inverter"
+          for i in config.inverters.filter(x => x.id == e.params.id) key=i.id
+            column navigationKey=`${e.id}` navigationScroll="inverter-list" position="absolute" inset=0 display="flex" flex-direction="column"
+              header display="flex" align-items="center"
+                text "Inverter Details" role="heading" aria-level=1 flex=1
+              list id="inverter-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
+                section
+                  header
+                    text "Details"
+                  row
+                    text "Serial Number" flex=1
+                    text serialText(i.serialNumber) color="-exact-secondary-label" testId="serial"
+                section
+                  header
+                    text "Efficiency"
+                  row gap=8 align-items="center"
+                    text "Current" flex=1
+                    button press=nudge(i.id, i.efficiency - 5) disabled=(i.efficiency <= 0) aria-label="Decrease efficiency" testId="eff-down"
+                      text "−5"
+                    text `${round(i.efficiency)}%` font-variant-numeric="tabular-nums" min-width="3rem" text-align="center" testId="efficiency"
+                    button press=nudge(i.id, i.efficiency + 5) disabled=(i.efficiency >= 100) aria-label="Increase efficiency" testId="eff-up"
+                      text "+5"
+                  row
+                    text "Panel output" flex=1
+                    text formatWattage(panelOutput(config.defaultMaxWattage, i.efficiency)) color="-exact-secondary-label" testId="inverter-output"
+                  footer
+                    text "Efficiency scales every panel on this micro-inverter. The RN app uses a slider; this uses 5% steps."
