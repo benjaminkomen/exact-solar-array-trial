@@ -38,7 +38,11 @@ env:
 
 jobs:
   ios:
-    runs-on: macos-26
+    # Exact's own CI uses macos-26, but that image's default Xcode cannot
+    # compile Exact's Swift host (UIArrangementViewController and newer
+    # AVAudioSession APIs). GitHub's xcode-27 image is the one that ships
+    # those SDKs. Exact does not build iOS apps in its own CI.
+    runs-on: xcode-27
     timeout-minutes: 120
     defaults:
       run:
@@ -85,7 +89,8 @@ jobs:
           cache-directories: |
             ${{ github.workspace }}/app/target
           prefix-key: ios-${{ env.EXACT_REF }}
-          key: macos-26
+          key: xcode-27
+          cache-on-failure: true
 
       - name: Cache Hermes bundles
         uses: actions/cache@v4

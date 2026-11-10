@@ -91,7 +91,7 @@ Exact's router has no base path, and a trailing slash matches no route. To work 
 
 ## iOS build (GitHub Actions)
 
-EAS Build does not support Exact yet. Exact is not a React Native project, and its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode. Putting that on EAS would mean installing those tools on Expo's workers by hand. This repo uses a GitHub Actions workflow instead: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on the same `macos-26` runner Exact's own CI uses.
+EAS Build does not support Exact yet. Exact is not a React Native project, and its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode. Putting that on EAS would mean installing those tools on Expo's workers by hand. This repo uses a GitHub Actions workflow instead: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's `xcode-27` runner. Exact's own CI uses `macos-26`, but that image's default Xcode cannot compile Exact's Swift host (it references APIs such as `UIArrangementViewController` that the older SDK does not include). Exact does not build iOS apps in its own CI.
 
 The workflow checks out a pinned Exact commit (Exact is pre-alpha and changes daily), installs the Rust toolchain and iOS targets Exact pins, Bun, and the attested Hermes bundles Exact's README describes, then builds:
 
