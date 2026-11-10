@@ -1,10 +1,9 @@
-// A web-only port of solar-array-simulator's main screens to Exact:
-//   Layout Editor (custom.tsx, SolarPanelCanvas, CustomChrome, ZoomControls)
-//   Panel Details sheet (panel-details.tsx, PanelDetailsForm)
-//   Production (production.tsx, ProductionCanvas, ProductionPanel)
-//   Configuration (config.tsx) and its Micro-inverter sheet (inverter-details.tsx)
-// Logic (snap, collision, free position, rotation, output) lives in app.ts, ported
-// from the repo's utils. Panel art is BasePanelShape/SolarPanel/ProductionPanel in SVG.
+// A web-only port of solar-array-simulator to Exact, following the RN app's own flow:
+//   Welcome (index.tsx) -> Configure (config.tsx?wizard=true) -> Photo (upload.tsx)
+//   -> Layout (custom.tsx) -> Finish -> Production (production.tsx)
+// with the WizardProgress stepper, the Compass and its Array Orientation sheet
+// (compass-help.tsx), Panel Details, and the Micro-inverter sheet. Logic (snap, collision,
+// free position, rotation, output, compass angle) lives in app.ts, ported from the repo.
 shape Inverter
   id: string
   serialNumber: string
@@ -14,7 +13,12 @@ shape Config
   defaultMaxWattage: number
   panelTiltAngle: number
   roofType: string
+  compassDirection: number
   inverters: Inverter[]
+
+shape Compass
+  angle: number
+  direction: number
 
 shape Panel
   id: string
@@ -25,6 +29,8 @@ shape Panel
 
 shape Panels
   panels: Panel[]
+  centerX: number
+  centerY: number
 
 shape PanelWatt
   id: string
@@ -43,14 +49,18 @@ shape Reply
 
 // Every route sits under the GitHub Pages subpath, so a reload of a pushed screen on the
 // live demo finds it. Exact's router has no base path, and `/` or a trailing slash
-// matches nothing here: `notfound` lands on top of the layout and steps back at once.
+// matches nothing here: `notfound` lands on top of Welcome and steps back at once.
+// The wizard is the RN app's `?wizard=true` query on config, upload and custom.
 routes nav
-  layout "/exact-solar-array-trial"
-    panel "/exact-solar-array-trial/panel/:id"
-    production "/exact-solar-array-trial/production"
-      linked "/exact-solar-array-trial/production/panel/:id"
+  welcome "/exact-solar-array-trial"
     config "/exact-solar-array-trial/config"
       inverter "/exact-solar-array-trial/config/inverter/:id"
+    upload "/exact-solar-array-trial/upload"
+    custom "/exact-solar-array-trial/custom"
+      panel "/exact-solar-array-trial/custom/panel/:id"
+      compassHelp "/exact-solar-array-trial/custom/compass-help"
+    production "/exact-solar-array-trial/production"
+      linked "/exact-solar-array-trial/production/panel/:id"
   notfound
 
 // formatters.ts formatWattage
@@ -69,14 +79,20 @@ fn effOf(invs: Inverter[], id: string): number = sum(invs.filter(i => i.id == id
 fn roofLabel(r: string): string = r == "gable" ? "Gable" : r == "hip" ? "Hip" : r == "flat" ? "Flat" : "Shed"
 fn efficiencyText(e: number): string = `${round(e)}% efficiency`
 
+fn isWizard(e: Entry): bool = searchParam(e, "wizard") == "true"
+fn wiz(base: string, on: bool): string = on ? `${base}?wizard=true` : base
+
 component SolarApp
   resource config = config() as shape Config
   resource layout = panels() as shape Panels
   resource viewport = exactViewport() as shape Viewport
+  resource compass = compass() as shape Compass
   state tick = 0
   resource production = production(tick) as shape Production
   mutation saved as shape Reply queue refreshes config, layout, production
   mutation dropped as shape Reply queue refreshes layout, production then endDrag
+  mutation aimed as shape Reply queue refreshes compass
+  mutation aimDone as shape Reply queue refreshes compass, config
   state selected = ""
   state dragId = ""
   state dragDx = 0
@@ -84,15 +100,25 @@ component SolarApp
   state vx = 0
   state vy = 0
   state zoom = 0
+  state canvasW = 390
+  state canvasH = 600
+  state pvx = 0
+  state pvy = 0
+  state pzoom = 0
+  state prodW = 390
+  state prodH = 500
+  state prodCentered = false
+  state compassVisible = false
+  state compassMoved = false
+  state downX = 0
+  state downY = 0
   state wattageDraft = "430"
   state serialDraft = ""
   state effDraft = 95
   derive scale = zoomScale(zoom)
-  derive cx = viewport.width / 2
-  derive cy = (viewport.height - 52) / 2
+  derive pscale = zoomScale(pzoom)
   derive panels = layout.panels
   derive unlinked = panels.filter(p => p.inverterId == "").length
-  derive selectedPanels = panels.filter(p => p.id == selected)
 
   task fixLocation when top(nav).name == "notfound"
     after(1, goHome)
@@ -109,7 +135,45 @@ component SolarApp
   action nextTick
     tick = tick + 1
 
+  // ---- wizard: index.tsx -> config -> upload -> custom -> production ------------------
+  action getStarted
+    wattageDraft = `${config.defaultMaxWattage}`
+    nav = push(nav, wiz(path("config"), true))
+  action continueToPhoto
+    nav = push(nav, wiz(path("upload"), true))
+  // useUpload handleSkip: /custom?wizard=true, with the panels the app already has
+  action skipPhoto
+    nav = push(nav, wiz(path("custom"), true))
+  // Continue without photo -> Analyze -> buildMockPanelGrid; Analyze itself is not ported
+  action withoutPhoto
+    send saved = mockGrid(viewport.width, viewport.height - 133)
+    nav = push(nav, wiz(path("custom"), true))
+  // wizardChrome requestWizardFinish: Custom is replaced by Production
+  action finish
+    selected = ""
+    prodCentered = false
+    nav = open(nav, path("production"))
+  action editConfiguration
+    wattageDraft = `${config.defaultMaxWattage}`
+    nav = push(nav, wiz(path("config"), true))
+  action deleteConfiguration
+    send saved = resetAll()
+    selected = ""
+    vx = 0
+    vy = 0
+    nav = open(nav, path("welcome"))
+
   // ---- canvas: SolarPanelCanvas pan + tap -----------------------------------------
+  action fitCanvas(w: number, h: number)
+    canvasW = w
+    canvasH = h
+  action fitProd(w: number, h: number)
+    prodW = w
+    prodH = h
+    if not prodCentered and panels.length > 0
+      pvx = w / 2 - layout.centerX
+      pvy = h / 2 - layout.centerY
+      prodCentered = true
   action select(id: string)
     selected = id
   action deselect
@@ -132,22 +196,67 @@ component SolarApp
   action panView(dx: number, dy: number)
     vx = vx + dx / scale
     vy = vy + dy / scale
+  action panProd(dx: number, dy: number)
+    pvx = pvx + dx / pscale
+    pvy = pvy + dy / pscale
   action zoomIn
     zoom = max(0, zoom - 1)
   action zoomOut
     zoom = min(2, zoom + 1)
+  action pzoomIn
+    pzoom = max(0, pzoom - 1)
+  action pzoomOut
+    pzoom = min(2, pzoom + 1)
   // useCanvasEditor handleSnapToOrigin: centre the first panel
   action snapToOrigin
     if panels.length > 0
-      vx = cx - sum(panels.slice(0, 1).map(p => p.x + panelW(p.rotation) / 2))
-      vy = cy - sum(panels.slice(0, 1).map(p => p.y + panelH(p.rotation) / 2))
+      vx = canvasW / 2 - sum(panels.slice(0, 1).map(p => p.x + panelW(p.rotation) / 2))
+      vy = canvasH / 2 - sum(panels.slice(0, 1).map(p => p.y + panelH(p.rotation) / 2))
     else
       vx = 0
       vy = 0
 
+  // ---- compass: Compass.tsx pan + tap, useCanvasEditor handleCompassToggle ------------
+  action toggleCompass
+    if compassVisible
+      compassVisible = false
+    else
+      compassVisible = true
+      nav = push(nav, path("compassHelp"))
+  // The pointer goes down on the compass: remember where, in its own 80 x 80 box.
+  // The compass's own pan takes the contact, so the canvas under it does not pan.
+  action compassDownAt(e: PointerEvent)
+    downX = e.offsetX
+    downY = e.offsetY
+    compassMoved = false
+  // Compass.tsx panGesture onUpdate: the angle from the centre to the finger
+  action compassPan(dx: number, dy: number)
+    let nx = downX + dx
+    let ny = downY + dy
+    downX = nx
+    downY = ny
+    compassMoved = true
+    send aimed = compassMove(nx - 40, ny - 40)
+  // onEnd: snap to the nearest 45° and store it in config.compassDirection
+  action compassRelease(rvx: number, rvy: number)
+    if compassMoved
+      send aimDone = compassRelease()
+    compassMoved = false
+  // tapGesture: the Array Orientation help
+  action compassTap
+    nav = push(nav, path("compassHelp"))
+  action ignorePointer(e: PointerEvent)
+    compassMoved = false
+  action ignorePan(dx: number, dy: number)
+    compassMoved = false
+  action ignoreRelease(rvx: number, rvy: number)
+    compassMoved = false
+  action ignoreTap
+    compassMoved = false
+
   // ---- bottom toolbar --------------------------------------------------------------
   action addPanel
-    send saved = addPanel(viewport.width, viewport.height - 52, vx, vy)
+    send saved = addPanel(canvasW, canvasH, vx, vy)
   action linkSelected
     nav = push(nav, path("panel", selected))
   action rotateSelected
@@ -158,15 +267,10 @@ component SolarApp
   action link(panelId: string, inverterId: string)
     send saved = linkPanel(panelId, inverterId)
     nav = back(nav)
-  action openProduction
-    nav = push(nav, path("production"))
   action openLinked(id: string)
     nav = push(nav, path("linked", id))
 
   // ---- configuration -------------------------------------------------------------
-  action openConfig
-    wattageDraft = `${config.defaultMaxWattage}`
-    nav = push(nav, path("config"))
   action editWattage(v: string)
     wattageDraft = v
     send saved = setWattage(v)
@@ -191,19 +295,109 @@ component SolarApp
   view
     main testId="root" navigationKey=`${top(nav).id}` navigationBack="back" navigate=follow width="100%" height="100%"
       for e in stack(nav) key=e.id
-        if e.name == "layout" or e.name == "notfound"
+        if e.name == "welcome" or e.name == "notfound"
+          // index.tsx: hero icon, title, subtitle, Get Started
+          column navigationKey=`${e.id}` navigationScroll="welcome-scroll" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center"
+              text "" role="heading" aria-level=1 flex=1
+            scroll id="welcome-scroll" flex=1 min-height=0 background-color="light-dark(#ffffff, #000000)"
+              column min-height="100%" align-items="center" justify-content="center" padding-left=24 padding-right=24 gap=24
+                box width=140 height=140 border-radius=32 overflow="hidden" background-color="light-dark(#eff6ff, #1e3a8a)" box-shadow="0 8px 24px rgba(59, 130, 246, 0.15)" display="flex" align-items="center" justify-content="center"
+                  image "assets/icon.png" width=140 height=140 object-fit="cover" alt="Solar Array Simulator icon"
+                column align-items="center" gap=8
+                  text "Solar Array Simulator" role="heading" aria-level=1 font-size=32 font-weight=700 text-align="center"
+                  text "Configure your solar panel array in 3 easy steps" font-size=17 line-height="24px" text-align="center" padding-left=16 padding-right=16 color="light-dark(#6b7280, #9ca3af)"
+                column width="100%" box-sizing="border-box" padding-left=16 padding-right=16
+                  button press=getStarted testId="get-started-button" appearance="none" width="100%" padding-top=18 padding-bottom=18 border-radius=14 background-color="#3b82f6" color="AccentColor"
+                    text "Get Started" font-size=17 font-weight=600 color="light-dark(#ffffff, #ffffff)" text-align="center"
+        if e.name == "config"
+          column navigationKey=`${e.id}` navigationScroll="config-list" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center"
+              text "Configuration" role="heading" aria-level=1 flex=1
+              if not isWizard(e)
+                button press=openInverter("new", "", 95) aria-label="Add inverter" testId="add-inverter"
+                  image "symbol:add"
+            if isWizard(e)
+              WizardProgress(step=1)
+            list id="config-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 padding-bottom=(isWizard(e) ? 88 : 0)
+              section
+                header
+                  text "Panel Settings"
+                row gap=8 align-items="center" flex-wrap="nowrap"
+                  text "Default Production" flex=1 min-width=0
+                  input value=wattageDraft input=editWattage inputmode="numeric" placeholder="430" aria-label="Default production" testId="wattage" width="5rem" flex-shrink=0
+                  text "W" color="-exact-secondary-label" testId="text-input-unit"
+                footer
+                  text "Configure the default wattage each micro-inverter and solar panel will produce at maximum production."
+              section
+                header
+                  text "Roof"
+                row role="radiogroup" aria-label="Roof type"
+                  for r in ["gable", "hip", "flat", "shed"] key=r
+                    button role="radio" aria-checked=(config.roofType == r) press=pickRoof(r) testId=`roof-${r}` flex=1
+                      text roofLabel(r)
+                row gap=12 align-items="center"
+                  text `Tilt Angle: ${round(config.panelTiltAngle)}°` testId="tilt"
+                  input type="range" min=0 max=90 step=5 value=config.panelTiltAngle input=tilt aria-label="Tilt angle" testId="tilt-slider" flex=1
+                footer
+                  text "Select your roof shape for the 3D simulation view."
+              section
+                header
+                  text `Micro-inverters (${config.inverters.length})`
+                for i in config.inverters key=i.id
+                  button press=openInverter(i.id, i.serialNumber, i.efficiency) delete=removeInverter(i.id) testId=`inverter-${i.id}`
+                    column flex=1 min-width=0 align-items="flex-start"
+                      text i.serialNumber
+                      text efficiencyText(i.efficiency) font="-exact-footnote" color="-exact-secondary-label"
+                    image "symbol:forward-chevron"
+            // config.tsx bottom toolbar: Continue (wizard) and + (add inverter)
+            if isWizard(e)
+              row position="absolute" bottom=24 left=0 right=0 justify-content="center" gap=12
+                button press=continueToPhoto testId="continue" buttonStyle="glass"
+                  text "Continue"
+                button press=openInverter("new", "", 95) aria-label="Add inverter" testId="add-inverter" buttonStyle="glass"
+                  image "symbol:add"
+        if e.name == "upload"
+          // upload.tsx: the Photo step. Camera, gallery and Analyze are not ported.
+          column navigationKey=`${e.id}` navigationScroll="upload-scroll" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center"
+              text "" role="heading" aria-level=1 flex=1
+            if isWizard(e)
+              WizardProgress(step=2)
+            scroll id="upload-scroll" flex=1 min-height=0 background-color="light-dark(#ffffff, #000000)"
+              column align-items="center" gap=24 padding-left=24 padding-right=24 padding-top=32 padding-bottom=96
+                box width=200 height=200 border-radius=32 background-color="light-dark(#f9fafb, #111827)" box-shadow="0 8px 24px rgba(0, 0, 0, 0.12)" display="flex" align-items="center" justify-content="center"
+                  image "symbol:photo" font-size=80 color="AccentColor" aria-hidden=true
+                text "Take or Select Photo" role="heading" aria-level=1 font-size=28 font-weight=700 text-align="center"
+                text "Photograph your solar panel array with visible serial numbers" font-size=15 line-height="22px" text-align="center" padding-left=16 padding-right=16 color="light-dark(#6b7280, #9ca3af)"
+                column gap=12 width="100%" margin-top=16
+                  button disabled=true testId="take-photo-button" appearance="none" padding="16px 24px" border-radius=14 background-color="#3b82f6" opacity=0.45 display="flex" align-items="center" justify-content="center" gap=10
+                    image "symbol:camera" color="light-dark(#ffffff, #ffffff)" aria-hidden=true
+                    text "Take Photo" font-size=17 font-weight=600 color="light-dark(#ffffff, #ffffff)"
+                  button disabled=true testId="choose-gallery-button" appearance="none" padding="16px 24px" border-radius=14 border-width=2 border-style="solid" border-color="light-dark(#e5e7eb, #374151)" opacity=0.45 display="flex" align-items="center" justify-content="center" gap=10
+                    image "symbol:photo" color="AccentColor" aria-hidden=true
+                    text "Choose from Gallery" font-size=17 font-weight=600 color="AccentColor"
+                  text "Camera and gallery are not ported in this trial." font="-exact-footnote" color="-exact-secondary-label" text-align="center" testId="photo-not-ported"
+                  if isWizard(e)
+                    button press=withoutPhoto testId="continue-without-photo" appearance="none" padding="16px 24px" border-radius=14 border-width=2 border-style="solid" border-color="light-dark(#e5e7eb, #374151)" display="flex" align-items="center" justify-content="center"
+                      text "Continue without photo" font-size=17 font-weight=600 color="AccentColor"
+            if isWizard(e)
+              row position="absolute" bottom=24 left=0 right=0 justify-content="center"
+                button press=skipPhoto testId="skip" buttonStyle="glass"
+                  text "Skip"
+        if e.name == "custom"
           column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column"
+            // CustomHeaderToolbar: compass toggle, unlinked-count link, snap to origin
             header display="flex" align-items="center" gap=4
               text "Layout Editor" role="heading" aria-level=1 flex=1
-              button press=openProduction aria-label="Production" testId="open-production"
-                image "symbol:chart"
-              button press=openConfig aria-label="Configuration" testId="open-config"
-                image "symbol:settings"
-              // CustomHeaderToolbar's link: a count of unlinked panels, not a control
+              button press=toggleCompass aria-label="Toggle compass" testId="toggle-compass"
+                svg width=22 height=22 viewBox="0 0 24 24" aria-hidden=true
+                  circle cx=12 cy=12 r=9.5 fill="none" stroke="currentColor" stroke-width=1.6
+                  path d="M12 5.5 L8.2 16.5 L12 14.2 L15.8 16.5 Z" fill="currentColor"
               box role="status" aria-label=`Unlinked panels: ${unlinked}` testId="unlinked" position="relative" padding=8
                 image "symbol:link" aria-hidden=true
                 if unlinked > 0
-                  text `${unlinked}` testId="unlinked-count" position="absolute" top=-2 right=-4 min-width=18 height=18 padding-left=5 padding-right=5 border-radius=9 background-color="-exact-system-red" color="#ffffff" font-size=11 font-weight=700 text-align="center" line-height="18px"
+                  text `${unlinked}` testId="unlinked-count" position="absolute" top=-2 right=-4 min-width=18 height=18 padding-left=5 padding-right=5 border-radius=9 background-color="-exact-system-red" color="light-dark(#ffffff, #ffffff)" font-size=11 font-weight=700 text-align="center" line-height="18px"
               button press=snapToOrigin aria-label="Snap to origin" testId="snap"
                 svg width=22 height=22 viewBox="0 0 24 24" aria-hidden=true
                   circle cx=12 cy=12 r=7 fill="none" stroke="currentColor" stroke-width=1.8
@@ -211,13 +405,18 @@ component SolarApp
                   line x1=12 y1=17 x2=12 y2=22 stroke="currentColor" stroke-width=1.8
                   line x1=2 y1=12 x2=7 y2=12 stroke="currentColor" stroke-width=1.8
                   line x1=17 y1=12 x2=22 y2=12 stroke="currentColor" stroke-width=1.8
-            box testId="canvas" flex=1 min-height=0 position="relative" overflow="hidden" touch-action="none" background-color="light-dark(#f9fafb, #111827)" pan=panView press=deselect
+            if isWizard(e)
+              WizardProgress(step=3)
+            box testId="canvas" flex=1 min-height=0 position="relative" overflow="hidden" touch-action="none" background-color="light-dark(#f9fafb, #111827)" pan=panView press=deselect resize=fitCanvas
               for p in panels key=p.id
-                box testId=p.id aria-label=`Panel ${p.id}${p.inverterId == "" ? ", unlinked" : ", linked"}` touch-action="none" position="absolute" left=(toScreen(p.x + (dragId == p.id ? dragDx : 0), vx, cx, scale) - 4 * scale) top=(toScreen(p.y + (dragId == p.id ? dragDy : 0), vy, cy, scale) - 4 * scale) width=((panelW(p.rotation) + 8) * scale) height=((panelH(p.rotation) + 8) * scale) pan=drag(p.id) panrelease=drop(p.id, p.x, p.y) press=select(p.id)
+                box testId=p.id aria-label=`Panel ${p.id}${p.inverterId == "" ? ", unlinked" : ", linked"}` touch-action="none" position="absolute" left=(toScreen(p.x + (dragId == p.id ? dragDx : 0), vx, canvasW / 2, scale) - 4 * scale) top=(toScreen(p.y + (dragId == p.id ? dragDy : 0), vy, canvasH / 2, scale) - 4 * scale) width=((panelW(p.rotation) + 8) * scale) height=((panelH(p.rotation) + 8) * scale) pan=drag(p.id) panrelease=drop(p.id, p.x, p.y) press=select(p.id)
                   PanelArt(rotation=p.rotation, linked=(p.inverterId != ""), selected=(selected == p.id), label="")
+              if compassVisible
+                box position="absolute" top=16 right=48
+                  CompassRose(angle=compass.angle, readOnly=false, down=compassDownAt, drag=compassPan, release=compassRelease, tap=compassTap)
               ZoomControls(index=zoom, zoomIn=zoomIn, zoomOut=zoomOut)
-              // CustomBottomToolbar: Add always; Link, Rotate and Delete while a panel is selected
-              row position="absolute" bottom=24 left=0 right=0 justify-content="center"
+              // CustomBottomToolbar: Add; Link, Rotate, Delete while selected; Finish in the wizard
+              row position="absolute" bottom=24 left=0 right=0 justify-content="center" gap=12
                 row gap=4 padding=6 border-radius=28 background-color="light-dark(#ffffff, #1f2937)" box-shadow="0 2px 12px rgba(0, 0, 0, 0.12)"
                   button press=addPanel aria-label="Add panel" testId="add-panel" buttonStyle="borderless"
                     image "symbol:add"
@@ -230,6 +429,22 @@ component SolarApp
                         path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width=2 stroke-linecap="round" stroke-linejoin="round"
                     button press=deleteSelected aria-label="Delete panel" testId="delete-panel" buttonStyle="borderless"
                       image "symbol:delete"
+                if isWizard(e) and panels.length > 0
+                  button press=finish testId="finish" buttonStyle="glass"
+                    text "Finish"
+        if e.name == "compassHelp"
+          // compass-help.tsx: CompassHelpBody in a sheet
+          column navigationKey=`${e.id}` navigationPresentation="modal" position="absolute" inset=0 display="flex" flex-direction="column"
+            header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
+              button id="back" press=back aria-label="Close" testId="compass-help-close"
+                image "symbol:close"
+              text "" role="heading"
+              box width=44
+            column flex=1 align-items="center" justify-content="center" padding-left=24 padding-right=24 gap=12 testId="compass-help"
+              svg width=40 height=40 viewBox="0 0 24 24" aria-hidden=true
+                path d="M12 2 L4.5 20.5 L5.21 21.21 L12 18 L18.79 21.21 L19.5 20.5 Z" fill="#3b82f6"
+              text "Array Orientation" role="heading" aria-level=2 font-size=18 font-weight=700 text-align="center"
+              text "Drag the arrow to indicate which direction the top of your panel array faces. This helps track your array's orientation for optimal sun exposure." font-size=15 line-height="22px" text-align="center" padding-left=16 padding-right=16 color="light-dark(#6b7280, #9ca3af)"
         if e.name == "panel"
           for p in panels.filter(q => q.id == e.params.id) key=p.id
             column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="panel-list" position="absolute" inset=0 display="flex" flex-direction="column"
@@ -269,16 +484,20 @@ component SolarApp
               button popovertarget="production-menu" aria-label="More" testId="production-more"
                 image "symbol:ellipsis"
               column id="production-menu" popover="auto" role="menu"
-                button press=openConfig popovertarget="production-menu" popovertargetaction="hide" testId="edit-config"
+                button press=editConfiguration popovertarget="production-menu" popovertargetaction="hide" testId="edit-config"
                   text "Edit Configuration"
+                button press=deleteConfiguration destructive=true popovertarget="production-menu" popovertargetaction="hide" testId="delete-config"
+                  text "Delete Configuration"
             column margin-left=16 margin-right=16 margin-top=8 padding=20 border-radius=16 border-width=1 border-style="solid" border-color="light-dark(#e5e7eb, #374151)" background-color="light-dark(#ffffff, #000000)" box-shadow="0 2px 8px rgba(0, 0, 0, 0.08)"
               text "Total Array Output" font-size=13 font-weight=600 letter-spacing=0.3 text-transform="uppercase" margin-bottom=8 color="light-dark(#6b7280, #9ca3af)"
               text formatWattage(production.total) font-size=48 font-weight=700 font-variant-numeric="tabular-nums" testId="total-output"
-            box testId="production-canvas" flex=1 min-height=0 position="relative" overflow="hidden" touch-action="none" pan=panView
+            box testId="production-canvas" flex=1 min-height=0 position="relative" overflow="hidden" touch-action="none" pan=panProd resize=fitProd
               for p in panels key=p.id
-                box testId=`prod-${p.id}` aria-label=`Panel ${p.id}, ${formatWattage(wattOf(production.panels, p.id))}` position="absolute" left=(toScreen(p.x, vx, cx, scale) - 4 * scale) top=(toScreen(p.y, vy, cy, scale) - 4 * scale - 120) width=((panelW(p.rotation) + 8) * scale) height=((panelH(p.rotation) + 8) * scale) press=openLinked(p.id)
+                box testId=`prod-${p.id}` aria-label=`Panel ${p.id}, ${formatWattage(wattOf(production.panels, p.id))}` position="absolute" left=(toScreen(p.x, pvx, prodW / 2, pscale) - 4 * pscale) top=(toScreen(p.y, pvy, prodH / 2, pscale) - 4 * pscale) width=((panelW(p.rotation) + 8) * pscale) height=((panelH(p.rotation) + 8) * pscale) press=openLinked(p.id)
                   PanelArt(rotation=p.rotation, linked=(p.inverterId != ""), selected=false, label=`${wattOf(production.panels, p.id)}W`)
-              ZoomControls(index=zoom, zoomIn=zoomIn, zoomOut=zoomOut)
+              box position="absolute" top=16 right=16
+                CompassRose(angle=config.compassDirection, readOnly=true, down=ignorePointer, drag=ignorePan, release=ignoreRelease, tap=ignoreTap)
+              ZoomControls(index=pzoom, zoomIn=pzoomIn, zoomOut=pzoomOut)
         if e.name == "linked"
           for p in panels.filter(q => q.id == e.params.id) key=p.id
             column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="linked-list" position="absolute" inset=0 display="flex" flex-direction="column"
@@ -301,43 +520,6 @@ component SolarApp
                     row
                       text "Efficiency" flex=1
                       text `${round(effOf(config.inverters, p.inverterId))}%` color="-exact-secondary-label" testId="prod-efficiency"
-        if e.name == "config"
-          column navigationKey=`${e.id}` navigationScroll="config-list" position="absolute" inset=0 display="flex" flex-direction="column"
-            header display="flex" align-items="center"
-              text "Configuration" role="heading" aria-level=1 flex=1
-              button press=openInverter("", "", 95) aria-label="Add inverter" testId="add-inverter"
-                image "symbol:add"
-            list id="config-list" appearance="auto" listStyle="inset-grouped" flex=1 min-height=0
-              section
-                header
-                  text "Panel Settings"
-                row gap=8 align-items="center" flex-wrap="nowrap"
-                  text "Default Production" flex=1 min-width=0
-                  input value=wattageDraft input=editWattage inputmode="numeric" placeholder="430" aria-label="Default production" testId="wattage" width="5rem" flex-shrink=0
-                  text "W" color="-exact-secondary-label" testId="text-input-unit"
-                footer
-                  text "Configure the default wattage each micro-inverter and solar panel will produce at maximum production."
-              section
-                header
-                  text "Roof"
-                row role="radiogroup" aria-label="Roof type"
-                  for r in ["gable", "hip", "flat", "shed"] key=r
-                    button role="radio" aria-checked=(config.roofType == r) press=pickRoof(r) testId=`roof-${r}` flex=1
-                      text roofLabel(r)
-                row gap=12 align-items="center"
-                  text `Tilt Angle: ${round(config.panelTiltAngle)}°` testId="tilt"
-                  input type="range" min=0 max=90 step=5 value=config.panelTiltAngle input=tilt aria-label="Tilt angle" testId="tilt-slider" flex=1
-                footer
-                  text "Select your roof shape for the 3D simulation view."
-              section
-                header
-                  text `Micro-inverters (${config.inverters.length})`
-                for i in config.inverters key=i.id
-                  button press=openInverter(i.id, i.serialNumber, i.efficiency) delete=removeInverter(i.id) testId=`inverter-${i.id}`
-                    column flex=1 min-width=0 align-items="flex-start"
-                      text i.serialNumber
-                      text efficiencyText(i.efficiency) font="-exact-footnote" color="-exact-secondary-label"
-                    image "symbol:forward-chevron"
         if e.name == "inverter"
           column navigationKey=`${e.id}` navigationPresentation="modal" navigationScroll="inverter-list" position="absolute" inset=0 display="flex" flex-direction="column"
             header display="flex" align-items="center" justify-content="space-between" padding="8px 16px"
@@ -408,3 +590,45 @@ component ZoomControls
       button press=zoomOut disabled=(index == 2) aria-label="Zoom out" testId="zoom-out" appearance="none" width=44 height=44 display="flex" align-items="center" justify-content="center" opacity=(index == 2 ? 0.5 : 1)
         image "symbol:minus" font-size=22 color=(index == 2 ? "light-dark(#d1d5db, #4b5563)" : "light-dark(#111827, #ffffff)")
 
+// WizardProgress.tsx: three 32-pt circles (done: blue with a check; current: blue with its
+// number; future: white, 2-pt grey ring, grey number), 11-pt labels, 40 x 2 connectors.
+component WizardProgress
+  props
+    step: number
+  view
+    row testId="wizard-progress" justify-content="center" align-items="center" padding-top=12 padding-bottom=16 padding-left=24 padding-right=24 border-bottom-width=1 border-bottom-style="solid" border-bottom-color="light-dark(#f3f4f6, #1f2937)" background-color="light-dark(#ffffff, #000000)" aria-label=`Step ${step} of 3`
+      for s in [1, 2, 3] key=s
+        row align-items="center"
+          column align-items="center" gap=4
+            box testId=`step-${s}` width=32 height=32 border-radius=16 box-sizing="border-box" display="flex" align-items="center" justify-content="center" background-color=(s <= step ? "#3b82f6" : "light-dark(#ffffff, #000000)") border-width=(s > step ? 2 : 0) border-style="solid" border-color="light-dark(#d1d5db, #4b5563)"
+              if s < step
+                svg width=16 height=16 viewBox="0 0 16 16" aria-hidden=true
+                  path d="M3.5 8.5 L6.5 11.5 L12.5 4.5" fill="none" stroke="#ffffff" stroke-width=2.2 stroke-linecap="round" stroke-linejoin="round"
+              else
+                text `${s}` font-size=14 font-weight=600 color=(s == step ? "#ffffff" : "light-dark(#9ca3af, #6b7280)")
+            text (s == 1 ? "Configure" : s == 2 ? "Photo" : "Layout") font-size=11 font-weight=(s == step ? 600 : 400) color=(s == step ? "#3b82f6" : s < step ? "-exact-label" : "light-dark(#9ca3af, #6b7280)")
+          if s < 3
+            box width=40 height=2 margin-left=8 margin-right=8 margin-bottom=20 background-color=(s < step ? "#3b82f6" : "light-dark(#e5e7eb, #374151)")
+
+// Compass.tsx: 80 x 80, four 40° arcs at the diagonals on a 24-pt ring, N E S W on the
+// ring (12-pt, weight 800; N in the primary text colour), and the notched arrow rotated
+// to the angle. The drag is the box's pan from where the pointer went down; the angle
+// maths (atan2, the 45° snap) is app.ts's.
+component CompassRose
+  props
+    angle: number
+    readOnly: bool
+    down: action
+    drag: action
+    release: action
+    tap: action
+  view
+    box testId=(readOnly ? "compass-readonly" : "compass") width=80 height=80 touch-action="none" aria-label=`Array orientation ${round(angle)}°` pointerdown=down pan=drag panrelease=release press=tap
+      svg width=80 height=80 viewBox="0 0 80 80" aria-hidden=true
+        path d="M50.14 18.25 A24 24 0 0 1 61.75 29.86 M61.75 50.14 A24 24 0 0 1 50.14 61.75 M29.86 61.75 A24 24 0 0 1 18.25 50.14 M18.25 29.86 A24 24 0 0 1 29.86 18.25" fill="none" stroke="light-dark(#d1d5db, #4b5563)" stroke-width=2 stroke-linecap="round"
+        text "N" x=40 y=20 text-anchor="middle" font-size=12 font-weight=800 fill="light-dark(#111827, #f9fafb)"
+        text "E" x=64 y=44 text-anchor="middle" font-size=12 font-weight=800 fill="light-dark(#6b7280, #9ca3af)"
+        text "S" x=40 y=68 text-anchor="middle" font-size=12 font-weight=800 fill="light-dark(#6b7280, #9ca3af)"
+        text "W" x=16 y=44 text-anchor="middle" font-size=12 font-weight=800 fill="light-dark(#6b7280, #9ca3af)"
+        g transform=`rotate(${angle} 40 40)`
+          path d="M40 24 L28 52 L40 46 L52 52 Z M40 31 L34 46 L40 43 Z" fill-rule="evenodd" fill="light-dark(#111827, #f9fafb)"

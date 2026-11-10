@@ -94,23 +94,30 @@ function snapToNeighbors(cx: number, cy: number, w: number, h: number, id: strin
 }
 
 // ---- canvasLayout.ts buildMockPanelGrid ------------------------------------------
-// World coordinates are the canvas's own (viewport 0,0), as in the RN app. The grid is
-// centred on a nominal phone canvas (the screen below the header at 390 x 844).
+// World coordinates are the canvas's own (viewport 0,0), as in the RN app.
 const MOCK_GAP = 6, COLS = 5;
-const NOMINAL = { width: 390, height: 790 };
-const gridW = (COLS - 1) * (PANEL_WIDTH + MOCK_GAP) + PANEL_WIDTH;
-const gridH = PANEL_HEIGHT + MOCK_GAP + PANEL_HEIGHT;
-const offX = Math.round((NOMINAL.width - gridW) / 2), offY = Math.round((NOMINAL.height - gridH) / 2);
-let nextPanel = 11;
-// Demo seed: the wizard's grid arrives unlinked; the first eight are linked to
-// inverters 1-8 so Production has something to show. Link or unlink any of them.
-let panels: Panel[] = Array.from({ length: 10 }, (_, i) => ({
-  id: `panel-${i + 1}`,
-  x: offX + (i % COLS) * (PANEL_WIDTH + MOCK_GAP),
-  y: offY + Math.floor(i / COLS) * (PANEL_HEIGHT + MOCK_GAP),
-  rotation: 0,
-  inverterId: i < 8 ? String(i + 1) : '',
-}));
+function buildMockPanelGrid(canvasWidth: number, canvasHeight: number): Panel[] {
+  const gridW = (COLS - 1) * (PANEL_WIDTH + MOCK_GAP) + PANEL_WIDTH;
+  const gridH = PANEL_HEIGHT + MOCK_GAP + PANEL_HEIGHT;
+  const offX = Math.round((canvasWidth - gridW) / 2), offY = Math.round((canvasHeight - gridH) / 2);
+  return Array.from({ length: 10 }, (_, i) => ({
+    id: `panel-${nextPanel++}`,
+    x: offX + (i % COLS) * (PANEL_WIDTH + MOCK_GAP),
+    y: offY + Math.floor(i / COLS) * (PANEL_HEIGHT + MOCK_GAP),
+    rotation: 0,
+    inverterId: '',
+  }));
+}
+// The wizard starts with no panels (PanelsContext is empty until the Layout step
+// adds them, or Analyze hands over a grid); every new panel is unlinked.
+let nextPanel = 1;
+let panels: Panel[] = [];
+
+// ---- Compass.tsx ------------------------------------------------------------------
+// config.compassDirection: 0-360, 0 = North. While the arrow is dragged the angle
+// follows the pointer (atan2(dx, -dy)); on release it snaps to the nearest 45°.
+let compassDirection = 0;
+let compassAngle = 0;
 
 // ---- solarCalculations.ts getEffectiveOutput, no-location branch -----------------
 // maxWattage * efficiency * fluctuation, fluctuation = 0.95 + Math.random() * 0.1.
@@ -125,8 +132,39 @@ function fluctuation(tick: number, i: number) {
 
 const ok = { ok: true };
 const sources: Sources = {
-  config: (): Result<'config'> => ({ defaultMaxWattage, panelTiltAngle, roofType, inverters }),
-  panels: (): Result<'panels'> => ({ panels }),
+  config: (): Result<'config'> => ({ defaultMaxWattage, panelTiltAngle, roofType, compassDirection, inverters }),
+  compass: (): Result<'compass'> => ({ angle: compassAngle, direction: compassDirection }),
+  compassMove: ([dx, dy]) => {
+    const raw = Math.atan2(dx, -dy);
+    compassAngle = ((raw * 180) / Math.PI + 360) % 360;
+    return ok;
+  },
+  compassRelease: () => {
+    compassDirection = (Math.round(compassAngle / 45) * 45) % 360;
+    compassAngle = compassDirection;
+    return ok;
+  },
+  // Analyze without a photo: useCanvasEditor handleLayout -> buildMockPanelGrid
+  mockGrid: ([canvasWidth, canvasHeight]) => {
+    panels = buildMockPanelGrid(canvasWidth, canvasHeight);
+    return ok;
+  },
+  // useProductionMonitor handleDeleteConfiguration: resetAllData + clearPanels
+  resetAll: () => {
+    panels = [];
+    inverters = EFFICIENCIES.map((efficiency, i) => ({ id: String(i + 1), serialNumber: SERIALS[i], efficiency }));
+    nextInverterId = inverters.length + 1;
+    defaultMaxWattage = 430; panelTiltAngle = 30; roofType = 'gable'; compassDirection = 0; compassAngle = 0;
+    return ok;
+  },
+  panels: (): Result<'panels'> => {
+    // useViewport: the centre of the panels' bounding box, which Production centres on
+    if (panels.length === 0) return { panels, centerX: 0, centerY: 0 };
+    const r = panels.map(rectOf);
+    const minX = Math.min(...r.map((q) => q.x)), maxX = Math.max(...r.map((q) => q.x + q.width));
+    const minY = Math.min(...r.map((q) => q.y)), maxY = Math.max(...r.map((q) => q.y + q.height));
+    return { panels, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2 };
+  },
   production: ([tick]): Result<'production'> => {
     const out = panels.map((p, i) => {
       const inv = inverters.find((v) => v.id === p.inverterId);

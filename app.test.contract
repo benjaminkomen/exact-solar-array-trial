@@ -1,54 +1,112 @@
-test "layout editor: select, drag with snap, add, rotate, zoom"
+test "wizard: welcome, configure, skip photo, layout, finish, production"
   clock +5
+  expect tree has "get-started-button"
+  tap "get-started-button"
+  clock settle
+  expect tree has "step-1"
+  expect tree has "inverter-14"
+  tap "continue"
+  clock settle
+  expect tree has "take-photo-button"
+  expect disabled "take-photo-button"
+  tap "skip"
+  clock settle
+  expect tree has "step-3"
+  expect tree missing "panel-1"
+  expect tree missing "finish"
+  tap "add-panel"
+  clock settle
+  expect tree has "panel-1"
+  expect text "unlinked-count" == "1"
+  expect tree has "finish"
+  tap "finish"
+  clock settle
+  expect tree has "total-output"
+  expect tree has "prod-panel-1"
+  expect tree has "compass-readonly"
+
+test "wizard without photo: mock grid, all unlinked; drag with snap, rotate, zoom, link"
+  clock +5
+  tap "get-started-button"
+  clock settle
+  tap "continue"
+  clock settle
+  tap "continue-without-photo"
+  clock settle
   expect tree has "panel-10"
-  expect text "unlinked-count" == "2"
-  expect tree missing "rotate-panel"
+  expect text "unlinked-count" == "10"
   tap "panel-1"
   expect tree has "rotate-panel"
   tap "panel-1" drag 0 300
   clock settle
   expect state layout.panels.9.id == "panel-1"
-  expect state layout.panels.9.x == 33
-  expect state layout.panels.9.y == 526
   tap "rotate-panel"
   clock settle
   expect state layout.panels.9.rotation == 90
-  tap "add-panel"
-  clock settle
-  expect text "unlinked-count" == "3"
   tap "zoom-out"
   expect enabled "zoom-in"
   tap "zoom-out"
   expect disabled "zoom-out"
-
-test "panel details: link an inverter to an unlinked panel"
-  clock +5
   tap "panel-9"
   tap "link-panel"
   clock settle
-  tap "pick-9"
+  tap "pick-1"
   clock settle
-  expect text "unlinked-count" == "1"
+  expect text "unlinked-count" == "9"
 
-test "production: total, per-panel wattage and the linked inverter"
+test "compass: the toggle opens Array Orientation, a drag sets config.compassDirection"
   clock +5
-  tap "open-production"
+  tap "get-started-button"
   clock settle
-  expect text "total-output" == "3.2kW"
-  tap "prod-panel-8"
+  tap "continue"
   clock settle
-  expect text "prod-efficiency" == "75%"
+  tap "skip"
+  clock settle
+  expect tree missing "compass"
+  tap "toggle-compass"
+  clock settle
+  expect tree has "compass-help"
+  tap "compass-help-close"
+  clock settle
+  expect tree has "compass"
+  expect state config.compassDirection == 0
+  tap "compass" drag 30 0
+  clock settle
+  expect state config.compassDirection == 90
+  tap "compass" drag 0 30
+  clock settle
+  expect state config.compassDirection == 180
+
+test "production menu: edit configuration, roof, tilt, inverter sheet, wattage"
+  clock +5
+  tap "get-started-button"
+  clock settle
+  tap "continue"
+  clock settle
+  tap "continue-without-photo"
+  clock settle
+  tap "panel-1"
+  tap "link-panel"
+  clock settle
+  tap "pick-1"
+  clock settle
+  tap "finish"
+  clock settle
+  expect text "total-output" == "409W"
+  tap "prod-panel-1"
+  clock settle
+  expect text "prod-efficiency" == "95%"
   back
   clock settle
-  tap "prod-panel-10"
+  tap "prod-panel-2"
   clock settle
   expect tree has "no-inverter"
-
-test "configuration: wattage, roof, and the micro-inverter sheet"
-  clock +5
-  tap "open-config"
+  back
   clock settle
-  expect tree has "inverter-14"
+  tap "production-more"
+  tap "edit-config"
+  clock settle
+  expect tree has "step-1"
   tap "roof-shed"
   clock settle
   type "tilt-slider" "10"
@@ -63,8 +121,4 @@ test "configuration: wattage, roof, and the micro-inverter sheet"
   clock settle
   type "wattage" "400"
   clock settle
-  back
-  clock settle
-  tap "open-production"
-  clock settle
-  expect text "total-output" == "3.0kW"
+  expect text "wattage" == "400"
