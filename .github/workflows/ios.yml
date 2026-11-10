@@ -12,8 +12,10 @@ name: iOS
 
 on:
   workflow_dispatch:
+  # This pull request's branch is listed while its cold and warm cache runs
+  # are recorded. Remove it after those two runs.
   push:
-    branches: [main]
+    branches: [main, cursor/ci-build-cache-72d9]
     paths:
       - "app.contract"
       - "app.ts"
