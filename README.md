@@ -2,43 +2,55 @@
 
 **Live demo:** https://benjaminkomen.github.io/exact-solar-array-trial/
 
-A trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework. It ports four screens of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator) so the two can be compared side by side. It runs on the web only and is an experiment, not a full port.
+A trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework. It ports the main screens of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator) and tries to match them as closely as Exact allows. It runs on the web only.
+
+The panel art follows the RN app's `BasePanelShape`, `SolarPanel` and `ProductionPanel` and is drawn in SVG:
+- a 60 × 120 panel with an 8-point corner radius and a 2-point frame;
+- one centre line and three cross lines;
+- the theme's linked (blue) and unlinked (grey) colours;
+- a 3-point amber ring when the panel is selected;
+- a dark wattage label on Production.
+
+The RN code has no gradient or sheen, so this doesn't either.
+
+![RN panel next to Exact panel](docs/compare-panel-closeup.png)
 
 ## Screens
 
-| Exact screen | RN source | Ported | Missing or replaced |
+| Exact screen | RN source | Matches | Still different |
 |---|---|---|---|
-| Array layout | `src/app/custom.tsx` (`SolarPanelCanvas`, `useCanvasEditor`) | Placing and removing panels, live panel count, capacity and output | Drag, rotate, snap, collision and zoom are replaced by a fixed 7×2 grid of tap-to-toggle slots, one per micro-inverter. No Skia canvas. |
-| Production | `src/app/production.tsx` (`useProductionMonitor`, `ProductionCanvas`) | Total Array Output card, per-panel wattage, tap a panel to open its inverter | No canvas, compass or zoom. Output is static: the 1 s refresh and ±5% noise are left out. No Simulate (3D) screen and no Edit/Delete menu. |
-| Configuration | `src/app/config.tsx` (`useConfigForm`, `InverterSection`) | Default Production wattage (parsed and clamped as in `updateDefaultWattage`), micro-inverter list with serial and efficiency | No location search (it needs a geocoding API), no roof type or tilt, no add, delete or swipe, and no wizard mode. |
-| Inverter Details | `src/app/inverter-details.tsx` (`InverterDetailsForm`) | Serial, efficiency, resulting panel output | The efficiency slider is replaced by ±5% buttons. The serial number can't be edited. |
+| Layout Editor | `custom.tsx`, `SolarPanelCanvas`, `CustomChrome`, `ZoomControls` | Panels drawn as above. Drag a panel and it snaps on release to its neighbours or the 30-point grid, refusing a collision (`neighborSnap.ts`, `collision.ts`) and moving to the front. Drag the background to pan. Tap to select or deselect. Add uses `findFreePosition`. Rotate uses `findValidPositionAfterRotation`. Delete. Link opens Panel Details. The zoom control has three levels (1, 0.66, 0.4). The header shows the unlinked-panel badge and Snap to origin. The canvas transform is the same as the RN app's. | No wizard progress and no compass toggle (compass help is skipped). Production and Configuration are header buttons here, while the RN app reaches them through the wizard flow. The toolbar is a floating pill rather than iOS's native bottom toolbar. Snap to origin jumps instead of animating. |
+| Panel Details sheet | `panel-details.tsx`, `PanelDetailsForm` | Linked Inverter (serial, efficiency, Unlink) and Available Inverters with the real footer copy. | It's a full-height sheet: Exact's web host has no detents. There's no "add inverter" shortcut. |
+| Production | `production.tsx`, `ProductionCanvas`, `ProductionPanel` | The Total Array Output card (13-point uppercase label, 48-point bold tabular value, 16-point radius, shadow) and the same canvas with per-panel wattage labels. Tapping a panel opens its inverter. Pan, the zoom control, and the ⋯ menu's Edit Configuration all work. Output refreshes every second with a ±5% spread. | Sources can't call `Math.random()`, so the spread is a hash of the tick. There's no compass, no Simulate (sun) button (the 3D screen is skipped), and no Delete Configuration. |
+| Configuration | `config.tsx`, `InverterSection` | Panel Settings (wattage field with W and the real footer), Roof segments (Gable, Hip, Flat, Shed) with a 0–90° tilt slider in 5° steps, and Micro-inverters (N) rows with chevrons, swipe to delete, and + to add. | No Location section, because the city search needs a geocoding API. No wizard Continue. |
+| Micro-inverter sheet | `inverter-details.tsx`, `InverterDetailsForm` | Edit or Add titles, Serial Number field, Efficiency with Current % and a 0–100 slider, and the real footer copy for each mode. | Exact's web host draws the bar buttons as Cancel and Save at the bottom, not the iOS ✕ and ✓. |
 
 Skipped:
 - Welcome (`index.tsx`).
-- Upload and analysis (`upload.tsx`, `analyze.tsx`): they use the camera, an image picker and an AI API.
-- Simulation (`simulation.tsx`): it's a three.js 3D scene.
+- Upload and analysis: they use the camera, an image picker and an AI API.
+- Simulation: it's a three.js scene.
 - Compass help.
-- Panel details sheet.
 
-**Real data and math:**
-- `defaultMaxWattage` is 430 W.
-- The 14 default inverters keep their efficiencies: seven at 95%, then 75, 68, 62, 20, 15, 0 and 0%. These all come from `DEFAULT_CONFIG` in `src/utils/configStore.ts`.
-- Per-panel output is `getEffectiveOutput`'s formula when no location is set (`maxWattage × efficiency / 100`), with the noise left out and rounded as `useProductionMonitor` does.
-- Wattage is formatted with a port of `formatWattage`.
-- Serial numbers are fixed stand-ins, because Exact sources may not use randomness.
-- The config lives in memory rather than in kv-store.
+**Data:**
+- All numbers come from the repo: `defaultMaxWattage` 430 W, the 14 default inverter efficiencies, panel size and gap, grid and snap threshold, zoom levels, and the panel colours.
+- The canvas starts from `buildMockPanelGrid`'s 2 × 5 grid.
+- For the demo, panels 1–8 start linked to inverters 1–8; the RN wizard starts with every panel unlinked.
+- Serial numbers are fixed, because the repo generates them randomly.
+- Everything is kept in memory.
 
-| Array layout | Production | Configuration | Inverter Details |
-|---|---|---|---|
-| ![Array layout](docs/screen-1-layout.png) | ![Production](docs/screen-2-production.png) | ![Configuration](docs/screen-3-config.png) | ![Inverter Details](docs/screen-4-inverter.png) |
+**Side by side** (left: the repo's iOS screenshots; right: the live Exact web build at 390 × 844):
 
-The screenshots come from `bun exact.mjs agent web --size 390x844`.
+| | |
+|---|---|
+| ![](docs/compare-1-layout.png) | ![](docs/compare-3-production.png) |
+| ![](docs/compare-2-panel-details.png) | ![](docs/compare-4-production-panel.png) |
+| ![](docs/compare-5-config.png) | ![](docs/compare-6-inverter.png) |
 
 ## Files
 
-- `app.contract`: the view, routes, state and actions, written in Exact's Contract language. The screens form one stack: layout → production or configuration → inverter.
-- `app.ts`: the data module. It holds the config and handles the `setWattage` and `setEfficiency` mutations.
-- `app.test.contract`: three tests, one per screen, that check both navigation and the totals.
+- `app.contract`: the views, routes, state and actions, written in Exact's Contract language. `PanelArt` draws a panel and `ZoomControls` is the zoom card.
+- `app.ts`: the data module, holding the config and panels. Snap, collision, free-position, rotation and output logic are ported from the repo's `utils/`.
+- `app.test.contract`: four tests. They cover a drag that snaps to an exact position, rotate, add, zoom, linking, Production totals and its sheet, and the Configuration sliders and save.
 - `scripts/deploy-pages.sh`: builds the app and publishes it to the `gh-pages` branch.
 
 ## Running it
@@ -52,7 +64,7 @@ git clone https://github.com/benjaminkomen/exact-solar-array-trial.git
 cd exact-solar-array-trial
 bun exact.mjs web            # dev loop in the browser
 bun exact.mjs test web       # runs app.test.contract
-bun exact.mjs agent web "tap open-production" "screenshot out.png"
+bun exact.mjs agent web "tap panel-1 drag 0 300" "clock settle" "screenshot out.png"
 ```
 
 Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update` refreshes the generated files against your checkout.
