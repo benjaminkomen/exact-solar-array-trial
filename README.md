@@ -58,11 +58,34 @@ Skipped:
 | ![](docs/compare-2-panel-details.png) | ![](docs/compare-4-production-panel.png) |
 | ![](docs/compare-5-config.png) | ![](docs/compare-6-inverter.png) |
 
+## 3D simulation: two spikes
+
+Production's **Simulate** button opens the RN Simulation screen (`simulation.tsx`): total output, the time, the sunrise-to-sunset hour slider and the season chips. A picker at the top switches between two renderers of the same scene: the sky, the ground, the grey roof slab tilted by the configured tilt, your layout's panels as blue boxes, and the sun. The hour and season logic (`solarCalculations.ts`, `getVisualSunPosition`, `computePanelLayout`, the output with tilt and compass direction) is `simulate` in `app.ts`. Both spikes draw from its result.
+
+Live: [three.js iframe](https://benjaminkomen.github.io/exact-solar-array-trial/production/simulate?engine=three) and [wgpu module](https://benjaminkomen.github.io/exact-solar-array-trial/production/simulate?engine=gpu). Opening those links directly starts at Welcome, since state lives in memory, so go through the wizard to Production first.
+
+![RN Simulation next to both spikes](docs/compare-simulation.png)
+
+| | three.js iframe (`assets/sim3d/`) | wgpu GPU module (`gpu/`) |
+|---|---|---|
+| How it works | A standalone page with plain three.js 0.172 (the RN app's version) and the WebGL renderer, in Exact's `iframe`. The guest posts `ready`, then the app sends the scene string with `postMessage(text, "sim3d")`, and a keyed task resends it whenever it changes. | A Rust `Surface` (`roof`) on `exact-gpu`, placed with `canvas surface=roof(...)`. The scene arrives as the canvas's arguments. It has three small pipelines (the sky gradient, lit cubes, the sun's glow) with 4x MSAA and a depth buffer. |
+| Code | `main.js` 149 lines, `index.html` 13, plus the vendored three.js | `roof.rs` 368, `roof.wgsl` 136, `lib.rs` 33, a 55-line native test, plus a Cargo workspace (`Cargo.toml`, `web/`, `apple/`), because an app with a GPU module has to author one |
+| Shared | `app.ts` +71 lines (`simulate`), `app.contract` +97 (the screen) | the same |
+| Download (gzip) | three.js 175 KB + `main.js` 3 KB | `gpu_bg.wasm` 132 KB + glue about 45 KB + shader 2 KB |
+| Draws | Every display frame, like R3F (about 60 fps on the box's software GPU) | Only when an argument changes |
+| Looks | Closest to RN: real three.js lights, fog and sky dome. The glow sprite stands in for RN's bloom pass. | Close, with Lambert lighting, exponential fog and a sky gradient. No clouds or bloom. |
+| Without the GPU API | Needs WebGL, which every browser has | Needs WebGPU. Without it the app shows a "needs WebGPU" note under the empty canvas. |
+| iOS | Bundled: a page under `assets/` loads from the app in a web view (LLP 1020.001), so it works offline. It's a WKWebView with WebGL inside the native app. | The idiomatic path: the same Rust renders on Metal. It's packaged by the iOS archive like Caltrain's module. Not built on iOS yet. |
+
+Neither has orbit or shadows, and RN has neither. Clouds aren't ported in either spike.
+
 ## Files
 
 - `app.contract`: the views, routes, state and actions, written in Exact's Contract language. `PanelArt` draws a panel, `ZoomControls` is the zoom card, `WizardProgress` is the stepper and `CompassRose` is the compass.
 - `app.ts`: the data module, holding the config and panels. Snap, collision, free-position, rotation and output logic are ported from the repo's `utils/`.
-- `app.test.contract`: five tests. They cover the whole wizard (Welcome → Configure → Skip → Layout → Finish → Production), the photo-less grid with drag, rotate, zoom and link, a compass drag that sets `config.compassDirection` to 90° then 180°, Production's menu back into Configuration, and zoom easing through intermediate scales over 200 ms.
+- `assets/sim3d/`: the three.js spike's iframe page, with three.js 0.172 vendored (MIT, `THREE-LICENSE`).
+- `gpu/`: the wgpu spike, a GPU module crate with the `roof` surface, its WGSL and a native readback test (`cargo test -p exact-solar-trial-gpu`). `Cargo.toml`, `web/` and `apple/` make up the app's own Cargo workspace, which a GPU module needs.
+- `app.test.contract`: six tests. They cover the whole wizard (Welcome → Configure → Skip → Layout → Finish → Production), the photo-less grid with drag, rotate, zoom and link, a compass drag that sets `config.compassDirection` to 90° then 180°, Production's menu back into Configuration, zoom easing through intermediate scales over 200 ms, and the Simulation screen (the hour and season move the time, and the engine picker swaps the iframe for the GPU canvas).
 - `scripts/deploy-pages.sh`: builds the app and publishes it to the `gh-pages` branch.
 
 ## Running it
@@ -78,6 +101,8 @@ bun exact.mjs web            # dev loop in the browser
 bun exact.mjs test web       # runs app.test.contract
 bun exact.mjs agent web "tap get-started-button" "clock settle" "screenshot out.png"
 ```
+
+The native GPU test needs a Vulkan driver. On a Linux box without one, Chrome's bundled SwiftShader works: `VK_ICD_FILENAMES=/opt/google/chrome/vk_swiftshader_icd.json LD_LIBRARY_PATH=/opt/google/chrome cargo test -p exact-solar-trial-gpu`. Headless Chrome draws the wgpu canvas only with `--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader --use-vulkan=swiftshader --enable-features=Vulkan,WebGPUSwiftShader`. Without those flags the device is lost after the first frames.
 
 Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update` refreshes the generated files against your checkout.
 
