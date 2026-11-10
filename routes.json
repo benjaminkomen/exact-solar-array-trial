@@ -1,0 +1,70 @@
+{
+  "routes": [
+    {
+      "name": "welcome",
+      "pattern": "/exact-solar-array-trial",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "config",
+      "pattern": "/exact-solar-array-trial/config",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "inverter",
+      "pattern": "/exact-solar-array-trial/config/inverter/:id",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "upload",
+      "pattern": "/exact-solar-array-trial/upload",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "custom",
+      "pattern": "/exact-solar-array-trial/custom",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "panel",
+      "pattern": "/exact-solar-array-trial/custom/panel/:id",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "compassHelp",
+      "pattern": "/exact-solar-array-trial/custom/compass-help",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "production",
+      "pattern": "/exact-solar-array-trial/production",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "linked",
+      "pattern": "/exact-solar-array-trial/production/panel/:id",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "simulate",
+      "pattern": "/exact-solar-array-trial/production/simulate",
+      "render": "client",
+      "notfound": false
+    },
+    {
+      "name": "notfound",
+      "pattern": "",
+      "render": "client",
+      "notfound": true
+    }
+  ]
+}

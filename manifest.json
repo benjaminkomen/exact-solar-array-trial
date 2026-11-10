@@ -1,0 +1,15 @@
+{
+  "name": "Exact Solar Trial",
+  "short_name": "Exact Solar Trial",
+  "id": "com.example.exact-solar-trial-4c9ea2",
+  "start_url": "/",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "assets/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ],
+  "lang": "en"
+}

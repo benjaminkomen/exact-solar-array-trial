@@ -1,0 +1,1 @@
+const e=new WeakMap,t=new ResizeObserver(n=>{for(let{target:r,contentRect:i}of n){if(!r.isConnected){t.unobserve(r),e.delete(r);continue}e.get(r)?.(i)}});function n(n,r){e.set(n,r),t.observe(n)}globalThis.exact&&(globalThis.exact.observeResize=n);export{n as observeResize};

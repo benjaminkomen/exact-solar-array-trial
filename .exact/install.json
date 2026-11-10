@@ -1,0 +1,32 @@
+{
+  "exactInstall": 1,
+  "app": {
+    "name": "Exact Solar Trial"
+  },
+  "build": {
+    "id": "82b68e7f681d5f6bd8362fa8853237a892b91cbe183afaaee85042239d9ee1f0",
+    "source": null,
+    "dirty": null,
+    "builtAt": "2026-11-10T15:27:46.798Z",
+    "mode": "Release build"
+  },
+  "platforms": {
+    "web": {
+      "methods": [
+        {
+          "kind": "browser",
+          "url": "/",
+          "recommended": false,
+          "label": "Open in browser"
+        }
+      ]
+    },
+    "ios": {
+      "methods": []
+    },
+    "macos": {
+      "methods": []
+    }
+  },
+  "reach": null
+}
