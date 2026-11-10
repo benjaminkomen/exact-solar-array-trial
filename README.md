@@ -2,6 +2,8 @@
 
 A small trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework, using one slice of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator).
 
+**Live demo:** https://benjaminkomen.github.io/exact-solar-array-trial/
+
 It's an experiment, not a port. It has one screen, no persistence and no gestures.
 
 ## The slice
@@ -42,6 +44,12 @@ bun exact.mjs agent web "tap slot-4" state "screenshot out.png"
 ```
 
 Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update` refreshes the generated files against your checkout.
+
+## Deploying the demo
+
+`scripts/deploy-pages.sh` builds the static site with `bun exact.mjs web-build --out dist` and force-pushes it to the `gh-pages` branch. GitHub Pages serves it from a subpath, so the script points `<base href>` at `/exact-solar-array-trial/`. The app's assets are relative, so that's all it needs.
+
+Exact's router has no base path, and a trailing slash matches no route. `app.contract` therefore declares a `notfound` route that draws the same screen.
 
 ## License
 

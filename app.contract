@@ -13,6 +13,9 @@ shape PanelArray
 
 routes nav
   home "/"
+  // GitHub Pages serves the demo at /exact-solar-array-trial/. Exact's router has no base
+  // path and a trailing slash matches no pattern, so every unmatched location draws this screen too.
+  notfound
 
 // formatters.ts formatWattage
 fn formatWattage(watts: number): string = watts >= 1000 ? `${(watts / 1000).toFixed(1)}kW` : `${watts}W`
