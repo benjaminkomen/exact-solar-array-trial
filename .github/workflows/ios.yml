@@ -65,8 +65,14 @@ jobs:
           path: exact
 
       - name: Show Xcode
+        id: xcode
         working-directory: ${{ github.workspace }}
-        run: xcodebuild -version && xcrun --sdk iphoneos --show-sdk-path && xcrun --sdk iphonesimulator --show-sdk-path
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          xcrun --sdk iphonesimulator --show-sdk-path
+          version=$(xcodebuild -version | awk 'NR==1 { print $2 }')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Rust (Exact's rust-toolchain.toml)
         working-directory: exact
@@ -82,19 +88,34 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      # Exact's own CI caches Cargo this way. app/target is the bake's
-      # CARGO_TARGET_DIR (the app authors its Cargo workspace beside app.json since
-      # it has a GPU module: web/, apple/ and gpu/). exact/target holds the Hermes installer and
-      # Exact's host modules (SVG raster, and the Canvas GPU module when a
-      # Metal toolchain is present).
+      # Cargo's downloaded crates and exact/target (the Hermes installer).
+      # The key is not the old `xcode-27` one: that archive also held a pruned
+      # copy of app/target, and restoring it after the full target below would
+      # put the pruned tree back. The app's compiled tree is the next step.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: exact
-          cache-directories: |
-            ${{ github.workspace }}/app/target
           prefix-key: ios-${{ env.EXACT_REF }}
-          key: xcode-27
+          key: xcode-27-registry
           cache-on-failure: true
+
+      # docs/reference.md, "Build an iOS app on a CI machine": keeping the
+      # app's target/ and ~/.cache/exact between runs is what turns a cold
+      # build of tens of minutes into minutes. target/ holds the Rust and the
+      # Swift host (apple-swift, apple-modules). ~/.cache/exact holds the
+      # machine copies (apple-modules, apple-crates) a fresh target reads.
+      # The key is the pinned Exact commit, the Xcode this image actually
+      # selected, and the app's Cargo.lock. A lockfile change may reuse the
+      # same commit and Xcode; a different Xcode does not.
+      - name: Cache app target and Exact's Apple cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/target
+            ~/.cache/exact
+          key: ios-${{ env.EXACT_REF }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('app/Cargo.lock') }}
+          restore-keys: |
+            ios-${{ env.EXACT_REF }}-xcode-${{ steps.xcode.outputs.version }}-
 
       # Restore/save are split so a failed build still writes the Hermes cache.
       # actions/cache's post step is skipped on failure, which left the first
