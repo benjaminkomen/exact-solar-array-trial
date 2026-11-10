@@ -98,7 +98,7 @@ The workflow checks out a pinned Exact commit (Exact is pre-alpha and changes da
 - an unsigned device `.ipa`, with `bun exact.mjs ios --device --archive ExactSolarTrial.ipa --unsigned`. Exact ad-hoc signs it with no profile and no team, for a service that re-signs it.
 - an iOS Simulator `.app`, with `bun exact.mjs ios --no-install` (a compile check: it does not boot a simulator).
 
-There are no Apple signing secrets, so the `.ipa` cannot be installed on a phone until it is re-signed. Run the workflow from the Actions tab, or it runs on pushes to `main` that touch the app sources. The artifacts are attached to the run.
+There are no Apple signing secrets, so the `.ipa` cannot be installed on a phone until it is re-signed. An iOS distribution build also needs a square raster of at least 512 px in `app.json`'s `icons` array, which Exact's docs describe; this repo ships `assets/icon-1024.png`. Run the workflow from the Actions tab, or it runs on pushes to `main` that touch the app sources. The artifacts are attached to the run.
 
 The workflow does not run Exact's full `bun scripts/exact.mjs setup`, which also installs the web and game toolchain. It only installs what an iOS TypeScript app needs.
 

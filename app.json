@@ -5,6 +5,13 @@
   "id": "com.example.exact-solar-trial-4c9ea2",
   "start_url": "/",
   "display": "standalone",
+  "icons": [
+    {
+      "src": "assets/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ],
   "app": {
     "id": "com.example.exact-solar-trial-4c9ea2",
     "name": "Exact Solar Trial"
