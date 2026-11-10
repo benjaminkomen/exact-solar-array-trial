@@ -122,3 +122,40 @@ test "production menu: edit configuration, roof, tilt, inverter sheet, wattage"
   type "wattage" "400"
   clock settle
   expect text "wattage" == "400"
+
+test "zoom eases over 200 ms through intermediate scales and lands on the target"
+  clock +5
+  tap "get-started-button"
+  clock settle
+  tap "continue"
+  clock settle
+  tap "continue-without-photo"
+  clock settle
+  expect state scale == 1
+  expect state zoom == 0
+  tap "zoom-out"
+  expect state zoom == 1
+  clock +100
+  expect state zoomBetween == true
+  expect state zoomBusy == true
+  expect state scale == 0.8300000000000001
+  clock +150
+  expect state scale == 0.66
+  expect state zoomBusy == false
+  expect state zoomBetween == false
+  tap "zoom-out"
+  expect state zoom == 2
+  clock +100
+  expect state zoomBetween == true
+  expect state zoomBusy == true
+  expect state scale == 0.53
+  clock +150
+  expect state scale == 0.4
+  expect state zoomBusy == false
+  expect state zoomBetween == false
+  tap "zoom-in"
+  clock +250
+  expect state scale == 0.66
+  expect state zoomBusy == false
+  expect state zoomBetween == false
+

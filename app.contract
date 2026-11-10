@@ -67,6 +67,9 @@ routes nav
 fn formatWattage(watts: number): string = watts >= 1000 ? `${(watts / 1000).toFixed(1)}kW` : `${watts}W`
 // zoomConstants.ts ZOOM_LEVELS
 fn zoomScale(i: number): number = i == 0 ? 1 : i == 1 ? 0.66 : 0.4
+// useZoom.ts animateScaleTo: withTiming(target, { duration: 200 })
+// Reanimated 4's default easing is Easing.inOut(Easing.quad)
+fn easeInOutQuad(t: number): number = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
 // panelUtils.ts getPanelDimensions
 fn panelW(rotation: number): number = rotation == 90 ? 120 : 60
 fn panelH(rotation: number): number = rotation == 90 ? 60 : 120
@@ -100,11 +103,22 @@ component SolarApp
   state vx = 0
   state vy = 0
   state zoom = 0
+  state scale = 1
+  state zoomFrom = 1
+  state zoomTo = 1
+  state zoomStart = 0
+  state zoomBusy = false
+  state zoomBetween = false
   state canvasW = 390
   state canvasH = 600
   state pvx = 0
   state pvy = 0
   state pzoom = 0
+  state pscale = 1
+  state pzoomFrom = 1
+  state pzoomTo = 1
+  state pzoomStart = 0
+  state pzoomBusy = false
   state prodW = 390
   state prodH = 500
   state prodCentered = false
@@ -115,8 +129,6 @@ component SolarApp
   state wattageDraft = "430"
   state serialDraft = ""
   state effDraft = 95
-  derive scale = zoomScale(zoom)
-  derive pscale = zoomScale(pzoom)
   derive panels = layout.panels
   derive unlinked = panels.filter(p => p.inverterId == "").length
 
@@ -125,6 +137,11 @@ component SolarApp
   // useProductionMonitor: wattages refresh every second
   task refresh when top(nav).name == "production"
     every(1000, nextTick)
+  // useZoom.ts: tween scale over 200 ms while the zoom index is already at the target
+  task zoomAnim when zoomBusy
+    every(frame, zoomTick)
+  task pzoomAnim when pzoomBusy
+    every(frame, pzoomTick)
 
   action goHome
     nav = back(nav)
@@ -200,13 +217,55 @@ component SolarApp
     pvx = pvx + dx / pscale
     pvy = pvy + dy / pscale
   action zoomIn
-    zoom = max(0, zoom - 1)
+    if zoom > 0
+      let next = zoom - 1
+      zoom = next
+      zoomFrom = scale
+      zoomTo = zoomScale(next)
+      zoomStart = performanceNow()
+      zoomBusy = true
+      zoomBetween = false
   action zoomOut
-    zoom = min(2, zoom + 1)
+    if zoom < 2
+      let next = zoom + 1
+      zoom = next
+      zoomFrom = scale
+      zoomTo = zoomScale(next)
+      zoomStart = performanceNow()
+      zoomBusy = true
+      zoomBetween = false
+  action zoomTick
+    let t = (performanceNow() - zoomStart) / 200
+    if t >= 1
+      scale = zoomTo
+      zoomBusy = false
+      zoomBetween = false
+    else
+      scale = zoomFrom + (zoomTo - zoomFrom) * easeInOutQuad(t < 0 ? 0 : t)
+      zoomBetween = t > 0
   action pzoomIn
-    pzoom = max(0, pzoom - 1)
+    if pzoom > 0
+      let next = pzoom - 1
+      pzoom = next
+      pzoomFrom = pscale
+      pzoomTo = zoomScale(next)
+      pzoomStart = performanceNow()
+      pzoomBusy = true
   action pzoomOut
-    pzoom = min(2, pzoom + 1)
+    if pzoom < 2
+      let next = pzoom + 1
+      pzoom = next
+      pzoomFrom = pscale
+      pzoomTo = zoomScale(next)
+      pzoomStart = performanceNow()
+      pzoomBusy = true
+  action pzoomTick
+    let t = (performanceNow() - pzoomStart) / 200
+    if t >= 1
+      pscale = pzoomTo
+      pzoomBusy = false
+    else
+      pscale = pzoomFrom + (pzoomTo - pzoomFrom) * easeInOutQuad(t < 0 ? 0 : t)
   // useCanvasEditor handleSnapToOrigin: centre the first panel
   action snapToOrigin
     if panels.length > 0
