@@ -138,11 +138,11 @@ bun exact.mjs ios --no-install
 
 ## iOS build (EAS, experimental)
 
-EAS can build this Exact app as an [Expo Workflow](https://docs.expo.dev/eas/workflows/syntax/). The build is an EAS [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. It doesn't use `eas/build`, prebuild or the `expo` package. It is tried on a free Expo account (45-minute limit), and builds an App Store-signed `.ipa` for `com.bkomen.exact-solar-trial` (signing is still blocked, see below).
+EAS can build this Exact app as an [Expo Workflow](https://docs.expo.dev/eas/workflows/syntax/). The build is an EAS [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. It doesn't use `eas/build`, prebuild or the `expo` package. It is tried on a free Expo account (45-minute limit), and builds an App Store-signed `.ipa` for `com.bkomen.exact-solar-trial`, then uploads it to App Store Connect.
 
 - [`.eas/workflows/ios.yml`](.eas/workflows/ios.yml) has two jobs:
   - `build_ios` is a `type: build` job (platform `ios`, profile `ios-exact`).
-  - `submit_ios` is a `type: submit` job that `needs` the build and takes its `build_id`. It is off (`if: ${{ never() }}`) until there are signing credentials and an App Store Connect app. EAS shows it as skipped.
+  - `submit_ios` is a `type: submit` job that `needs` the build and takes its `build_id`. It uploads the build to App Store Connect using the production submit profile.
   - The workflow has no trigger, so it only runs by hand.
 - [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml) is the custom build. It checks out the pinned Exact commit beside the app and installs rustup with the iOS targets (the image has Bun but no Rust). It then imports the EAS-managed distribution certificate and App Store profile (`eas.job.secrets.buildCredentials`) into a temporary keychain and installs the Hermes bundles. Finally it runs `bun exact.mjs ios --device --archive out.ipa` with `EXACT_IDENTITY` (the certificate's SHA-1) and `EXACT_PROFILE` (the profile's path), checks the signature with `codesign`, and uploads `out.ipa` as the build's application archive. `eas/configure_ios_credentials` can't be used, because it edits an Xcode project and Exact has none.
 - [`eas.json`](eas.json) defines the profile `ios-exact`, on the `macos-tahoe-26.6-xcode-27.2` image with `store` distribution (EAS-managed credentials), plus an empty `production` submit profile.
