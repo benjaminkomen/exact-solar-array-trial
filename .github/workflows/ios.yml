@@ -27,6 +27,23 @@ on:
       - "exact.mjs"
       - "package.json"
       - ".exact-ref"
+      - "scripts/normalize-mtimes.sh"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "app.contract"
+      - "app.ts"
+      - "app.json"
+      - "app.test.contract"
+      - "assets/**"
+      - "gpu/**"
+      - "apple/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "exact.mjs"
+      - "package.json"
+      - ".exact-ref"
+      - "scripts/normalize-mtimes.sh"
       - ".github/workflows/ios.yml"
 
 concurrency:

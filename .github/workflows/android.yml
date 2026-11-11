@@ -29,6 +29,7 @@ on:
       - "Cargo.lock"
       - "exact.mjs"
       - ".exact-ref"
+      - "scripts/normalize-mtimes.sh"
       - ".github/workflows/android.yml"
   pull_request:
     paths:
@@ -43,6 +44,7 @@ on:
       - "Cargo.lock"
       - "exact.mjs"
       - ".exact-ref"
+      - "scripts/normalize-mtimes.sh"
       - ".github/workflows/android.yml"
 
 concurrency:
