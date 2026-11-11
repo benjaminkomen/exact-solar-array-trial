@@ -9,8 +9,7 @@
 # (a build of one platform alone), realign them:
 #   npx eas-cli@latest build:version:get -p ios -e ios-exact
 #   npx eas-cli@latest build:version:set -p android -e android-exact
-# Local builds use the *-local profiles, which read the number and do not raise
-# it.
+# Builds that must not raise it (local runs, trials) use the *-nobump profiles.
 #
 # Android has no submit job: Exact builds a debug-signed APK, and Google Play
 # takes only an upload-signed bundle.

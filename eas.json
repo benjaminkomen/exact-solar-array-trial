@@ -19,11 +19,11 @@
       },
       "autoIncrement": true
     },
-    "ios-exact-local": {
+    "ios-exact-nobump": {
       "extends": "ios-exact",
       "autoIncrement": false
     },
-    "android-exact-local": {
+    "android-exact-nobump": {
       "extends": "android-exact",
       "autoIncrement": false
     }

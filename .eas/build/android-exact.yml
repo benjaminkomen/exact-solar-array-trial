@@ -52,6 +52,28 @@ build:
           cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target aarch64-linux-android
           cargo fetch --locked
 
+    # Exact compiles against Android platform 37.2 and tries NDK 27.1 first. The
+    # worker image may not carry them, so install what is missing (68 MB for the
+    # platform). Licences are accepted for the SDK parts Gradle fetches.
+    - run:
+        name: Android SDK platform and NDK
+        command: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}  ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          SDKM="$(command -v sdkmanager || true)"
+          if [ -z "$SDKM" ]; then SDKM="$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1 || true)"; fi
+          if [ -z "$SDKM" ]; then
+            echo "No sdkmanager found. SDK folder ($SDK) holds:" >&2
+            ls -la "$SDK" >&2 || true
+            exit 1
+          fi
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDKM" --sdk_root="$SDK" "platforms;android-37.2" "ndk;27.1.12297006"
+          ls "$SDK/platforms" "$SDK/ndk"
+          set-env ANDROID_HOME "$SDK"
+
     # Exact's Android host fixes versionCode = 1 in build.gradle.kts and reads
     # no variable for it (iOS reads EXACT_BUILD_NUMBER). Until it does, write
     # the number EAS manages into the checkout, and fail if the line is gone.
