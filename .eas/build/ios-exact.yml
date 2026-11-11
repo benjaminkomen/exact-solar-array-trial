@@ -1,9 +1,11 @@
 # Experimental: build the Exact iOS app on EAS Build with plain shell steps.
 # No eas/build, no prebuild, no node_modules: Exact's own script makes the .ipa.
 # Mirrors .github/workflows/ios.yml. EXACT_REF must match that workflow's pin.
-# Caches: EAS cache keys are written once, so each build saves under its own
-# build id and the next build restores the newest entry by prefix. Saves run
-# even when the build fails, so a timed-out cold build still seeds the next.
+# Caches: eas/save_build_cache in a build job only saves ccache and CocoaPods
+# (it ignores key and path), so this uses the generic eas/save_cache and
+# eas/restore_cache. Each build saves under its own build id and the next one
+# restores the newest entry by prefix. The save runs even when the build fails.
+# The paths are absolute: the project is checked out at ~/workingdir/build.
 build:
   name: Exact iOS (unsigned .ipa)
   steps:
@@ -31,30 +33,17 @@ build:
           set-env PATH "$PATH"
                     bun --version
 
-    - eas/restore_build_cache:
-        name: Restore app target
+    - eas/restore_cache:
+        name: Restore Rust and Exact caches
         inputs:
-          key: exact-ios-app-target-1bdedcb3-none
-          restore_keys: exact-ios-app-target-1bdedcb3-
-          path: target
-    - eas/restore_build_cache:
-        name: Restore Exact target
-        inputs:
-          key: exact-ios-exact-target-1bdedcb3-none
-          restore_keys: exact-ios-exact-target-1bdedcb3-
-          path: ../exact/target
-    - eas/restore_build_cache:
-        name: Restore Hermes bundles
-        inputs:
-          key: exact-ios-hermes-1bdedcb3-none
-          restore_keys: exact-ios-hermes-1bdedcb3-
-          path: ${ eas.env.HOME }/.cargo/hermes-lean-sys
-    - eas/restore_build_cache:
-        name: Restore Exact cache
-        inputs:
-          key: exact-ios-dotcache-1bdedcb3-none
-          restore_keys: exact-ios-dotcache-1bdedcb3-
-          path: ${ eas.env.HOME }/.cache/exact
+          key: exact-ios-1bdedcb3-none
+          restore_keys: exact-ios-1bdedcb3-
+          path: |
+            ${ eas.env.HOME }/workingdir/build/target
+            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+            ${ eas.env.HOME }/.cargo/registry
+            ${ eas.env.HOME }/.cache/exact
 
     - run:
         name: Exact setup (Bun deps, Hermes bundles, crates)
@@ -75,30 +64,17 @@ build:
           bun exact.mjs ios --device --archive "$PWD/out.ipa" --unsigned
           ls -lh out.ipa
 
-    - eas/save_build_cache:
-        name: Save app target
+    - eas/save_cache:
+        name: Save Rust and Exact caches
         if: ${ always() }
         inputs:
-          key: exact-ios-app-target-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-          path: target
-    - eas/save_build_cache:
-        name: Save Exact target
-        if: ${ always() }
-        inputs:
-          key: exact-ios-exact-target-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-          path: ../exact/target
-    - eas/save_build_cache:
-        name: Save Hermes bundles
-        if: ${ always() }
-        inputs:
-          key: exact-ios-hermes-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-          path: ${ eas.env.HOME }/.cargo/hermes-lean-sys
-    - eas/save_build_cache:
-        name: Save Exact cache
-        if: ${ always() }
-        inputs:
-          key: exact-ios-dotcache-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-          path: ${ eas.env.HOME }/.cache/exact
+          key: exact-ios-1bdedcb3-${ eas.env.EAS_BUILD_ID }
+          path: |
+            ${ eas.env.HOME }/workingdir/build/target
+            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+            ${ eas.env.HOME }/.cargo/registry
+            ${ eas.env.HOME }/.cache/exact
 
     - eas/upload_artifact:
         name: Upload unsigned .ipa
