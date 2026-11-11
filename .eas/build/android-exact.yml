@@ -108,6 +108,10 @@ build:
         command: |
           set -euo pipefail
           export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
+          # The EAS worker's ~/.gradle/init.gradle adds a Maven repository to every
+          # project, and Exact's settings.gradle.kts refuses project repositories
+          # (FAIL_ON_PROJECT_REPOS). A Gradle home of our own skips that script.
+          export GRADLE_USER_HOME="$HOME/.gradle-exact"
           export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
           # NDK 27.1.12297006 is the one Exact tries first. Platform 37.2
           # (compileSdk) must be installed: sdkmanager "platforms;android-37.2"
