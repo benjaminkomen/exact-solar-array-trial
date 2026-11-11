@@ -1,0 +1,16 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "ios-exact": {
+      "distribution": "internal",
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2",
+        "config": "ios-exact.yml",
+        "withoutCredentials": true
+      }
+    }
+  }
+}

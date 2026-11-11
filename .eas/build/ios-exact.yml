@@ -1,0 +1,103 @@
+# Experimental: build the Exact iOS app on EAS Build with plain shell steps.
+# No eas/build, no prebuild, no node_modules: Exact's own script makes the .ipa.
+# Mirrors .github/workflows/ios.yml. EXACT_REF must match that workflow's pin.
+build:
+  name: Exact iOS (unsigned .ipa)
+  steps:
+    - eas/checkout
+
+    - run:
+        name: Exact checkout and Rust
+        command: |
+          set -euo pipefail
+          EXACT_REF=1bdedcb30ffcb3a1dd8a181ba4ac16cb4f41ce19
+          xcodebuild -version
+          echo "Project dir: $PWD"
+          # The app's Cargo.toml patches crates from ../exact/vendor, so Exact sits beside the app.
+          mkdir -p ../exact && cd ../exact
+          git init -q && git remote add origin https://github.com/expo/exact.git
+          git fetch -q --depth 1 origin "$EXACT_REF" && git checkout -q FETCH_HEAD
+          git log --oneline -1
+          PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
+          if ! command -v rustup >/dev/null; then
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install "$PIN" --profile minimal --target aarch64-apple-ios aarch64-apple-ios-sim
+          rustc "+$PIN" --version
+          set-env PATH "$PATH"
+          bun --version
+
+    - eas/restore_build_cache:
+        name: Restore app target
+        inputs:
+          key: exact-ios-app-target-1bdedcb3
+          restore_keys: exact-ios-app-target
+          path: target
+    - eas/restore_build_cache:
+        name: Restore Exact target
+        inputs:
+          key: exact-ios-exact-target-1bdedcb3
+          restore_keys: exact-ios-exact-target
+          path: ../exact/target
+    - eas/restore_build_cache:
+        name: Restore Hermes bundles
+        inputs:
+          key: exact-ios-hermes-1bdedcb3
+          path: ${ eas.env.HOME }/.cargo/hermes-lean-sys
+    - eas/restore_build_cache:
+        name: Restore Exact cache
+        inputs:
+          key: exact-ios-dotcache-1bdedcb3
+          restore_keys: exact-ios-dotcache
+          path: ${ eas.env.HOME }/.cache/exact
+
+    - run:
+        name: Exact setup (Bun deps, Hermes bundles, crates)
+        command: |
+          set -euo pipefail
+          cd ../exact
+          bun install --frozen-lockfile
+          for t in aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim; do
+            cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target "$t"
+          done
+          cargo fetch --locked
+
+    - run:
+        name: Build unsigned device .ipa
+        command: |
+          set -euo pipefail
+          export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
+          bun exact.mjs ios --device --archive "$PWD/out.ipa" --unsigned
+          ls -lh out.ipa
+
+    - eas/save_build_cache:
+        name: Save app target
+        if: ${ always() }
+        inputs:
+          key: exact-ios-app-target-1bdedcb3
+          path: target
+    - eas/save_build_cache:
+        name: Save Exact target
+        if: ${ always() }
+        inputs:
+          key: exact-ios-exact-target-1bdedcb3
+          path: ../exact/target
+    - eas/save_build_cache:
+        name: Save Hermes bundles
+        if: ${ always() }
+        inputs:
+          key: exact-ios-hermes-1bdedcb3
+          path: ${ eas.env.HOME }/.cargo/hermes-lean-sys
+    - eas/save_build_cache:
+        name: Save Exact cache
+        if: ${ always() }
+        inputs:
+          key: exact-ios-dotcache-1bdedcb3
+          path: ${ eas.env.HOME }/.cache/exact
+
+    - eas/upload_artifact:
+        name: Upload unsigned .ipa
+        inputs:
+          type: application-archive
+          path: out.ipa
