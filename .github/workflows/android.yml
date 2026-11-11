@@ -30,6 +30,20 @@ on:
       - "exact.mjs"
       - ".exact-ref"
       - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "app.contract"
+      - "app.ts"
+      - "app.json"
+      - "assets/**"
+      - "gpu/**"
+      - "android/**"
+      - "linux/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "exact.mjs"
+      - ".exact-ref"
+      - ".github/workflows/android.yml"
 
 concurrency:
   group: android-${{ github.ref }}
