@@ -57,7 +57,8 @@ if [[ ! -d "$EXACT" ]]; then
     sudo chown "$(id -u):$(id -g)" "$EXACT"
   fi
 fi
-if [[ -e "$EXACT" && ! -d "$EXACT/.git" && -n "$(ls -A "$EXACT" 2>/dev/null || true)" ]]; then
+# A restored CI cache may already hold target/ and node_modules/ there.
+if [[ -e "$EXACT" && ! -d "$EXACT/.git" && -n "$(ls -A "$EXACT" 2>/dev/null | grep -v -x -e target -e node_modules || true)" ]]; then
   echo "Refusing to replace ${EXACT}: it exists and is not a git checkout" >&2
   exit 1
 fi
