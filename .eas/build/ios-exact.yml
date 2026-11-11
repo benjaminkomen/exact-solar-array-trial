@@ -21,6 +21,14 @@ build:
   steps:
     - eas/checkout
 
+    # A workflow build job starts without credentials or a resolved build
+    # number: eas/resolve_build_config runs eas-cli on the worker to fill in
+    # eas.job (secrets.buildCredentials, version.buildNumber). eas-cli needs
+    # expo-modules-autolinking from node_modules to read the iOS entitlements.
+    # (A build started with `eas build` resolves these on the laptop instead.)
+    - eas/install_node_modules
+    - eas/resolve_build_config
+
     - run:
         name: Exact checkout and Rust
         command: |
