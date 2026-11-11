@@ -138,24 +138,33 @@ bun exact.mjs ios --no-install
 
 ## iOS build (EAS, experimental)
 
-EAS Build can build this Exact app. It uses a [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. There is no `eas/build`, no prebuild and no `expo` package. It is tried on a free Expo account (45-minute limit), and the result is an unsigned `.ipa`.
+EAS can build this Exact app as an [Expo Workflow](https://docs.expo.dev/eas/workflows/syntax/). The build is an EAS [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. It doesn't use `eas/build`, prebuild or the `expo` package. It is tried on a free Expo account (45-minute limit), and the result is an unsigned `.ipa`.
 
-- [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml): checks out the pinned Exact commit beside the app, installs rustup with the iOS targets (the image has Bun but no Rust), installs the Hermes bundles, runs `bun exact.mjs ios --device --archive out.ipa --unsigned` and uploads `out.ipa` as the build's application archive.
-- [`eas.json`](eas.json): profile `ios-exact` on the `macos-tahoe-26.6-xcode-27.2` image, with `withoutCredentials`.
-- [`app.config.js`](app.config.js): the Expo config EAS wants (name, slug, bundle id, project id). `app.json` belongs to Exact and has its own schema, so it stays untouched.
+- [`.eas/workflows/ios.yml`](.eas/workflows/ios.yml) has two jobs:
+  - `build_ios` is a `type: build` job (platform `ios`, profile `ios-exact`).
+  - `submit_ios` is a `type: submit` job that `needs` the build and takes its `build_id`. It is off (`if: ${{ never() }}`) until there are signing credentials and an App Store Connect app. EAS shows it as skipped.
+  - The workflow has no trigger, so it only runs by hand.
+- [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml) is the custom build. It checks out the pinned Exact commit beside the app and installs rustup with the iOS targets (the image has Bun but no Rust). It then installs the Hermes bundles, runs `bun exact.mjs ios --device --archive out.ipa --unsigned` and uploads `out.ipa` as the build's application archive.
+- [`eas.json`](eas.json) defines the profile `ios-exact`, on the `macos-tahoe-26.6-xcode-27.2` image with `withoutCredentials`, plus an empty `production` submit profile.
+- [`app.config.js`](app.config.js) gives EAS the Expo config it wants (name, slug, bundle id, project id). `app.json` belongs to Exact and has its own schema, so it stays untouched.
 
 ```sh
-npx eas-cli@latest build -p ios --profile ios-exact
+npx eas-cli@latest workflow:run .eas/workflows/ios.yml
 ```
 
 What we found:
 
-- **It's fast.** A cold build took about 7 minutes on EAS's M4 Pro worker, against about 37 minutes cold on GitHub's `xcode-27` runner. The worker setup (Exact checkout, rustup, Hermes, crates) took about a minute, Rust took 324 s and Swift 32 s. The `.ipa` was 15 MB and showed up as the build's downloadable artifact.
-- **One workaround:** `eas build` resolves iOS entitlements locally and fails with "Cannot find 'expo-modules-autolinking' package in your project" when no Expo packages are installed. A devDependency on `expo-modules-autolinking` alone fixes that, without `expo` or React Native.
-- **A harmless warning:** at the end of the build the worker logs "Failed to read the app config file with `expo config` command: The `expo` package was not found." under "Unknown build phase". The build still finishes and uploads the `.ipa`. We left it alone rather than add `expo`.
-- **Caching:** in a build job, `eas/save_build_cache` and `eas/restore_build_cache` only handle ccache and CocoaPods. They ignore `key` and `path`, and the step still reports success. The generic `eas/save_cache` and `eas/restore_cache` take paths, so the config caches the app's `target/`, Exact's `target/`, the Hermes bundles, the Cargo registry and `~/.cache/exact` with those. A warm build hasn't been confirmed yet. On the one try, the save failed with "Path does not exist: /Users/expo/.cache/exact", because Exact never created that directory and one missing path aborts the whole save. The step still reports success. The config now creates the directory first. Size is the open question: the cold build leaves about 4 GB (app `target/` 2.1 GB, Exact `target/` 1.1 GB, Cargo registry 714 MB, Hermes 101 MB). At about 7 minutes cold, caching matters less here than on GitHub Actions.
+- **It's fast.** A cold build took 7 to 8 minutes on EAS's M4 Pro worker, against about 37 minutes cold on GitHub's `xcode-27` runner. The worker setup (Exact checkout, rustup, Hermes, crates) took about a minute, Rust about 330 s and Swift about 30 s. The `.ipa` was 15 MB and showed up as the build's downloadable artifact. As a workflow with the cache save, the whole run took about 10.5 minutes.
+- **One workaround:** `eas build` and `eas workflow:run` resolve iOS entitlements locally and fail with "Cannot find 'expo-modules-autolinking' package in your project" when no Expo packages are installed. A devDependency on `expo-modules-autolinking` alone fixes that, without `expo` or React Native.
+- **A harmless warning:** at the end of each build the worker logs "Failed to read the app config file with `expo config` command: The `expo` package was not found." under "Unknown build phase". The build still finishes and uploads the `.ipa`. We left it alone rather than add `expo`.
+- **Caching works, but doesn't help yet.**
+  - In a build job, `eas/save_build_cache` and `eas/restore_build_cache` only handle ccache and CocoaPods. They ignore `key` and `path`, and the step still reports success.
+  - The generic `eas/save_cache` and `eas/restore_cache` take paths. They fail the whole save if one path is missing, so the build creates `~/.cache/exact` first.
+  - The cache holds the app's `target/`, Exact's `target/`, the Hermes bundles and the Cargo registry. That is 1.3 GB compressed (about 4 GB on disk). Saving takes about 2 to 2.5 minutes, and restoring about 30 seconds.
+  - The next run restored it, but Cargo still recompiled every crate (344 of them, including registry crates such as `proc-macro2`). The warm build took longer than the cold one: 11 minutes against 10.
+  - The cause isn't known yet. One run with `CARGO_LOG=cargo::core::compiler::fingerprint=info` would show why Cargo treats the restored artifacts as stale. Until then, the cache costs about 3 minutes per run for no gain.
 
-Not done yet: signing and `eas submit`. Exact signs on the runner through `EXACT_IDENTITY` and `EXACT_PROFILE`, so the next step would be a build step that imports EAS-managed credentials (or a certificate and profile kept as EAS secrets) into a keychain and passes them to Exact instead of `--unsigned`. `eas submit` could then pick up the archive.
+Not done yet: signing and submit. Exact signs on the runner through `EXACT_IDENTITY` and `EXACT_PROFILE`. The next step would be a build step that imports EAS-managed credentials (or a certificate and profile kept as EAS secrets) into a keychain and passes them to Exact instead of `--unsigned`. Then add the App Store Connect app to the `production` submit profile and remove the submit job's `if:` line.
 
 ## License
 
