@@ -170,6 +170,20 @@ What we found:
 
 **Cache: off.** The steps that worked are kept, commented out, in `.eas/build/ios-exact.yml`, with notes on the likely cause: a freshly installed toolchain, or rustc, RUSTFLAGS or env differing between runs.
 
+## Android build (local)
+
+`bun exact.mjs android` builds the APK and installs it. The first run names Android in `app.json` (`host.android`). The Exact CLI then asks for `bun exact.mjs update` (writes the `android/` and `linux/` crates and adds them to `Cargo.toml`) and `bun exact.mjs lock` (refreshes `Cargo.lock`).
+
+The build needs these on the Mac:
+
+- Rust 1.97.0 with the `aarch64-linux-android` target and the Android Hermes bundle (`exact setup` adds both).
+- A JDK 17 or newer.
+- The Android SDK (`ANDROID_HOME`) with NDK 27.1.12297006 and platform 37.2. Install the platform with `sdkmanager "platforms;android-37.2"` (68 MB).
+
+The APK is `target/android/app/outputs/apk/release/app-release.apk`. With more than one device attached, set `ANDROID_SERIAL` to choose where it installs. `bun exact.mjs test android` and `bun exact.mjs verify android` drive the APK on that device.
+
+The wgpu 3D module builds and renders on Android with no change. The photo step has no camera on any platform in this trial, so Android has nothing extra to do there. The Android build signs with the debug key, so it is not an upload build for Google Play.
+
 ## License
 
 MIT

@@ -1,19 +1,18 @@
-# DRAFT, not run on EAS. Not referenced by eas.json. The APK path below was
-# checked in a local build (16 MB). Do not run `eas` with this file until the
-# open points below are settled.
+# Experimental: build the Exact Android app (a release APK) on EAS Build with
+# plain shell steps, like ios-exact.yml. Exact's own script builds the APK
+# (Rust for aarch64-linux-android, then Gradle).
 #
-# Shape: the same plain-shell custom build as ios-exact.yml, on a Linux worker.
-# Exact's own script builds the APK (Rust for aarch64-linux-android, then Gradle).
+# Run so far: `eas build -p android -e android-exact --local` on a Mac (exit 0,
+# 16 MB APK, debug-signed). Not run on EAS's cloud workers yet.
 #
-# Open points (see the notes the Android trial report lists):
+# Open points:
 #  - Signing: Exact's Gradle shell signs the release APK with the debug key
 #    (host/android/app/build.gradle.kts). That APK installs on a device but is
 #    not valid for Google Play. Play needs an upload keystore from EAS
 #    (eas.job.secrets.buildCredentials) and a bundle or a re-signed APK.
-#  - Platform 37.2 and build-tools: Gradle downloads them if licences are
+#  - Platform 37.2 and the NDK: Gradle downloads parts if licences are
 #    accepted; the worker image may not carry them.
-#  - Hermes bundle for aarch64-linux-android comes from hermes-lean-sys.
-#  - EXACT_REF comes from .exact-ref at the repo root.
+#  - The Exact commit comes from .exact-ref at the repo root.
 build:
   name: Exact Android (APK)
   steps:

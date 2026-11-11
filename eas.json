@@ -11,6 +11,12 @@
         "config": "ios-exact.yml"
       },
       "autoIncrement": true
+    },
+    "android-exact": {
+      "distribution": "internal",
+      "android": {
+        "config": "android-exact.yml"
+      }
     }
   },
   "submit": {

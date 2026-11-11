@@ -7,3 +7,6 @@
 /.exact/
 /.env.local
 /shots/
+
+# The user's global gitignore ignores build/; EAS custom builds live in .eas/build/.
+!/.eas/build/
