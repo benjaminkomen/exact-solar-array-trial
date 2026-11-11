@@ -1,13 +1,23 @@
-# Experimental: build the Exact iOS app on EAS Build with plain shell steps.
-# No eas/build, no prebuild, no node_modules: Exact's own script makes the .ipa.
-# Mirrors .github/workflows/ios.yml. EXACT_REF must match that workflow's pin.
-# Caches: eas/save_build_cache in a build job only saves ccache and CocoaPods
-# (it ignores key and path), so this uses the generic eas/save_cache and
-# eas/restore_cache. Each build saves under its own build id and the next one
-# restores the newest entry by prefix. The save runs even when the build fails.
-# The paths are absolute: the project is checked out at ~/workingdir/build.
+# Experimental: build and sign the Exact iOS app on EAS Build with plain shell
+# steps. No eas/build, no prebuild, no node_modules: Exact's own script makes
+# the .ipa. Mirrors .github/workflows/ios.yml. EXACT_REF must match that pin.
+#
+# Signing: EAS hands the managed App Store credentials (distribution
+# certificate .p12 and provisioning profile) to the job as
+# eas.job.secrets.buildCredentials. eas/configure_ios_credentials can't be used:
+# it edits an Xcode project, and Exact has none. So the "Signing" step imports
+# them into a temporary keychain itself and passes Exact EXACT_IDENTITY (the
+# certificate's SHA-1) and EXACT_PROFILE (the profile's path).
+#
+# Caching is off. eas/save_cache and eas/restore_cache round-trip the Rust
+# targets (1.3 GB), but Cargo still recompiled every crate on the next run, so
+# the cache cost about 3 minutes and saved nothing. Likely causes to look at
+# later: rustup installing the toolchain fresh each run (same version, new
+# install), or rustc, RUSTFLAGS or env differing between runs; one run with
+# CARGO_LOG=cargo::core::compiler::fingerprint=info would show which. The
+# steps that worked are kept at the bottom of this file, commented out.
 build:
-  name: Exact iOS (unsigned .ipa)
+  name: Exact iOS (signed App Store .ipa)
   steps:
     - eas/checkout
 
@@ -17,7 +27,6 @@ build:
           set -euo pipefail
           EXACT_REF=1bdedcb30ffcb3a1dd8a181ba4ac16cb4f41ce19
           xcodebuild -version
-          echo "Project dir: $PWD"
           # The app's Cargo.toml patches crates from ../exact/vendor, so Exact sits beside the app.
           mkdir -p ../exact && cd ../exact
           git init -q && git remote add origin https://github.com/expo/exact.git
@@ -31,22 +40,66 @@ build:
           rustup toolchain install "$PIN" --profile minimal --target aarch64-apple-ios,aarch64-apple-ios-sim
           rustc "+$PIN" --version
           set-env PATH "$PATH"
-          # eas/save_cache fails the whole save ("Failed to resolve paths") when any path is missing.
-          # Exact may not create ~/.cache/exact for this build, so make sure it exists.
-          mkdir -p "$HOME/.cache/exact"
-                    bun --version
+          bun --version
 
-    - eas/restore_cache:
-        name: Restore Rust and Exact caches
+    - run:
+        name: Signing (EAS credentials into a temporary keychain)
         inputs:
-          key: exact-ios-1bdedcb3-none
-          restore_keys: exact-ios-1bdedcb3-
-          path: |
-            ${ eas.env.HOME }/workingdir/build/target
-            ${ eas.env.HOME }/workingdir/exact/target
-            ${ eas.env.HOME }/.cargo/hermes-lean-sys
-            ${ eas.env.HOME }/.cargo/registry
-            ${ eas.env.HOME }/.cache/exact
+          credentials: ${ eas.job.secrets.buildCredentials }
+        command: |
+          set -euo pipefail
+          # Never echo the credentials: no set -x in this step.
+          WORK=$(mktemp -d)
+          cat > "$WORK/creds.json" <<'EXACT_CREDS_JSON'
+          ${ inputs.credentials }
+          EXACT_CREDS_JSON
+          # One target only (the app): pick its entry, write the p12, its password and the profile.
+          node -e '
+            const fs = require("fs"); const dir = process.argv[1];
+            const all = JSON.parse(fs.readFileSync(dir + "/creds.json", "utf8"));
+            const names = Object.keys(all || {});
+            if (names.length === 0) { console.error("No iOS build credentials were passed to this job."); process.exit(1); }
+            console.log("Credential targets: " + names.join(", "));
+            const t = all[names[0]];
+            fs.writeFileSync(dir + "/cert.p12", Buffer.from(t.distributionCertificate.dataBase64, "base64"));
+            fs.writeFileSync(dir + "/cert.pass", t.distributionCertificate.password ?? "");
+            fs.writeFileSync(dir + "/profile.mobileprovision", Buffer.from(t.provisioningProfileBase64, "base64"));
+          ' "$WORK"
+          rm -f "$WORK/creds.json"
+
+          KC="$HOME/Library/Keychains/exact-signing.keychain-db"
+          KCPASS=$(openssl rand -hex 24)
+          security create-keychain -p "$KCPASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPASS" "$KC"
+          security import "$WORK/cert.p12" -k "$KC" -f pkcs12 -P "$(cat "$WORK/cert.pass")" -A -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$WORK/cert.p12" "$WORK/cert.pass"
+
+          IDENTITY_LINE=$(security find-identity -v -p codesigning "$KC" | grep -E '^ *1\)' || true)
+          [ -n "$IDENTITY_LINE" ] || { echo "No codesigning identity in the imported certificate." >&2; exit 1; }
+          SHA1=$(echo "$IDENTITY_LINE" | awk '{print $2}')
+          echo "Signing identity: $(echo "$IDENTITY_LINE" | sed 's/^ *1) //')"
+
+          security cms -D -i "$WORK/profile.mobileprovision" > "$WORK/profile.plist"
+          UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$WORK/profile.plist")
+          PDIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PDIR"
+          PROFILE="$PDIR/$UUID.mobileprovision"
+          mv "$WORK/profile.mobileprovision" "$PROFILE"
+          echo "Profile: $(/usr/libexec/PlistBuddy -c 'Print :Name' "$WORK/profile.plist") ($UUID)"
+          echo "  App ID: $(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$WORK/profile.plist")"
+          echo "  Team: $(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$WORK/profile.plist")"
+          echo "  Expires: $(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$WORK/profile.plist")"
+          if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$WORK/profile.plist" >/dev/null 2>&1; then
+            echo "  Type: ad hoc or development (lists devices)"
+          else
+            echo "  Type: App Store (no device list)"
+          fi
+          rm -rf "$WORK"
+          set-env EXACT_IDENTITY "$SHA1"
+          set-env EXACT_PROFILE "$PROFILE"
 
     - run:
         name: Exact setup (Bun deps, Hermes bundles, crates)
@@ -60,27 +113,58 @@ build:
           cargo fetch --locked
 
     - run:
-        name: Build unsigned device .ipa
+        name: Build signed App Store .ipa
         command: |
           set -euo pipefail
           export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
-          bun exact.mjs ios --device --archive "$PWD/out.ipa" --unsigned
+          bun exact.mjs ios --device --archive "$PWD/out.ipa"
           ls -lh out.ipa
 
-    - eas/save_cache:
-        name: Save Rust and Exact caches
+    - run:
+        name: Verify the signature
+        command: |
+          set -euo pipefail
+          V=$(mktemp -d) && unzip -q out.ipa -d "$V"
+          APP=$(ls -d "$V"/Payload/*.app)
+          codesign --verify --deep --strict "$APP" && echo "codesign --verify: OK"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Format)='
+          echo "CFBundleIdentifier: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+          echo "Version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist" 2>/dev/null || echo '?') ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist" 2>/dev/null || echo '?'))"
+          security cms -D -i "$APP/embedded.mobileprovision" > "$V/embedded.plist"
+          echo "Embedded profile: $(/usr/libexec/PlistBuddy -c 'Print :Name' "$V/embedded.plist")"
+          codesign -d --entitlements :- "$APP" 2>/dev/null > "$V/ent.plist" || true
+          echo "get-task-allow: $(/usr/libexec/PlistBuddy -c 'Print :get-task-allow' "$V/ent.plist" 2>/dev/null || echo absent)"
+          rm -rf "$V"
+
+    - run:
+        name: Remove the temporary keychain
         if: ${ always() }
-        inputs:
-          key: exact-ios-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-          path: |
-            ${ eas.env.HOME }/workingdir/build/target
-            ${ eas.env.HOME }/workingdir/exact/target
-            ${ eas.env.HOME }/.cargo/hermes-lean-sys
-            ${ eas.env.HOME }/.cargo/registry
-            ${ eas.env.HOME }/.cache/exact
+        command: |
+          KC="$HOME/Library/Keychains/exact-signing.keychain-db"
+          [ -f "$KC" ] && security delete-keychain "$KC" || true
 
     - eas/upload_artifact:
-        name: Upload unsigned .ipa
+        name: Upload signed .ipa
         inputs:
           type: application-archive
           path: out.ipa
+
+# Cache steps (off, see the note at the top). They go after "Exact checkout and
+# Rust" and after the build. Make sure every path exists before saving
+# (mkdir -p "$HOME/.cache/exact"): one missing path aborts the whole save.
+#
+#    - eas/restore_cache:
+#        inputs:
+#          key: exact-ios-1bdedcb3-none
+#          restore_keys: exact-ios-1bdedcb3-
+#          path: |
+#            ${ eas.env.HOME }/workingdir/build/target
+#            ${ eas.env.HOME }/workingdir/exact/target
+#            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+#            ${ eas.env.HOME }/.cargo/registry
+#            ${ eas.env.HOME }/.cache/exact
+#    - eas/save_cache:
+#        if: ${ always() }
+#        inputs:
+#          key: exact-ios-1bdedcb3-${ eas.env.EAS_BUILD_ID }
+#          path: (same list)

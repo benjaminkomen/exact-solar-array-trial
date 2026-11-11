@@ -5,11 +5,10 @@
   },
   "build": {
     "ios-exact": {
-      "distribution": "internal",
+      "distribution": "store",
       "ios": {
         "image": "macos-tahoe-26.6-xcode-27.2",
-        "config": "ios-exact.yml",
-        "withoutCredentials": true
+        "config": "ios-exact.yml"
       }
     }
   },

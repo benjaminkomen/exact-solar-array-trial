@@ -9,7 +9,7 @@ module.exports = () => ({
   version: '0.1.0',
   platforms: ['ios'],
   ios: {
-    bundleIdentifier: 'com.example.exact-solar-trial-4c9ea2',
+    bundleIdentifier: 'com.bkomen.exact-solar-trial',
     buildNumber: '1',
     infoPlist: { ITSAppUsesNonExemptEncryption: false },
   },
