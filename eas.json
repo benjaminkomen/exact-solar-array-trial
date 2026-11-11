@@ -12,5 +12,8 @@
         "withoutCredentials": true
       }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
