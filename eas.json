@@ -1,0 +1,23 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "ios-exact": {
+      "distribution": "store",
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2",
+        "config": "ios-exact.yml"
+      },
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6833494203"
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "../exact/scripts/app.schema.json",
   "name": "Exact Solar Trial",
   "short_name": "Exact Solar Trial",
-  "id": "com.example.exact-solar-trial-4c9ea2",
+  "id": "com.bkomen.exact-solar-trial",
   "start_url": "/",
   "display": "standalone",
   "icons": [
@@ -13,7 +13,7 @@
     }
   ],
   "app": {
-    "id": "com.example.exact-solar-trial-4c9ea2",
+    "id": "com.bkomen.exact-solar-trial",
     "name": "Exact Solar Trial"
   },
   "host": {

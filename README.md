@@ -118,7 +118,7 @@ Exact's router has no base path, and a trailing slash matches no route. To work 
 
 ## iOS build (GitHub Actions)
 
-EAS Build does not support Exact yet. Exact is not a React Native project, and its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode. Putting that on EAS would mean installing those tools on Expo's workers by hand. This repo uses a GitHub Actions workflow instead: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's `xcode-27` runner. Exact's own CI uses `macos-26`, but that image's default Xcode cannot compile Exact's Swift host (it references APIs such as `UIArrangementViewController` that the older SDK does not include). Exact does not build iOS apps in its own CI.
+Exact is not a React Native project. Its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode, so EAS Build's standard build does not apply. An experimental EAS custom build is described in the next section. This repo's main iOS build is a GitHub Actions workflow: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's `xcode-27` runner. Exact's own CI uses `macos-26`, but that image's default Xcode cannot compile Exact's Swift host (it references APIs such as `UIArrangementViewController` that the older SDK does not include). Exact does not build iOS apps in its own CI.
 
 The workflow checks out a pinned Exact commit (Exact is pre-alpha and changes daily), installs the Rust toolchain and iOS targets Exact pins, Bun, and the attested Hermes bundles Exact's README describes, then builds:
 
@@ -135,6 +135,40 @@ To build the same way on a Mac, with Exact checked out next to this repo:
 bun exact.mjs ios --device --archive ExactSolarTrial.ipa --unsigned
 bun exact.mjs ios --no-install
 ```
+
+## iOS build (EAS, experimental)
+
+EAS can build this Exact app as an [Expo Workflow](https://docs.expo.dev/eas/workflows/syntax/). The build is an EAS [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. It doesn't use `eas/build`, prebuild or the `expo` package. It is tried on a free Expo account (45-minute limit), and builds an App Store-signed `.ipa` for `com.bkomen.exact-solar-trial`, then uploads it to App Store Connect.
+
+- [`.eas/workflows/ios.yml`](.eas/workflows/ios.yml) has two jobs:
+  - `build_ios` is a `type: build` job (platform `ios`, profile `ios-exact`).
+  - `submit_ios` is a `type: submit` job that `needs` the build and takes its `build_id`. It uploads the build to App Store Connect using the production submit profile.
+  - The workflow has no trigger, so it only runs by hand.
+- [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml) is the custom build. It checks out the pinned Exact commit beside the app and installs rustup with the iOS targets (the image has Bun but no Rust). It then imports the EAS-managed distribution certificate and App Store profile (`eas.job.secrets.buildCredentials`) into a temporary keychain and installs the Hermes bundles. Finally it runs `bun exact.mjs ios --device --archive out.ipa` with `EXACT_IDENTITY` (the certificate's SHA-1) and `EXACT_PROFILE` (the profile's path), checks the signature with `codesign`, and uploads `out.ipa` as the build's application archive. `eas/configure_ios_credentials` can't be used, because it edits an Xcode project and Exact has none.
+- [`eas.json`](eas.json) defines the profile `ios-exact`, on the `macos-tahoe-26.6-xcode-27.2` image with `store` distribution (EAS-managed credentials), plus an empty `production` submit profile.
+- [`app.config.js`](app.config.js) gives EAS the Expo config it wants (name, slug, bundle id, project id). `app.json` belongs to Exact and has its own schema, so it stays untouched.
+
+```sh
+npx eas-cli@latest workflow:run .eas/workflows/ios.yml
+```
+
+What we found:
+
+- **It's fast.** A cold build took 7 to 8 minutes on EAS's M4 Pro worker, against about 37 minutes cold on GitHub's `xcode-27` runner. The worker setup (Exact checkout, rustup, Hermes, crates) took about a minute, Rust about 330 s and Swift about 30 s. The `.ipa` was 15 MB and showed up as the build's downloadable artifact. As a workflow with the cache save, the whole run took about 10.5 minutes.
+- **One workaround:** `eas build` and `eas workflow:run` resolve iOS entitlements locally and fail with "Cannot find 'expo-modules-autolinking' package in your project" when no Expo packages are installed. A devDependency on `expo-modules-autolinking` alone fixes that, without `expo` or React Native.
+- **A harmless warning:** at the end of each build the worker logs "Failed to read the app config file with `expo config` command: The `expo` package was not found." under "Unknown build phase". The build still finishes and uploads the `.ipa`. We left it alone rather than add `expo`.
+- **Caching works, but doesn't help yet.**
+  - In a build job, `eas/save_build_cache` and `eas/restore_build_cache` only handle ccache and CocoaPods. They ignore `key` and `path`, and the step still reports success.
+  - The generic `eas/save_cache` and `eas/restore_cache` take paths. They fail the whole save if one path is missing, so the build creates `~/.cache/exact` first.
+  - The cache holds the app's `target/`, Exact's `target/`, the Hermes bundles and the Cargo registry. That is 1.3 GB compressed (about 4 GB on disk). Saving takes about 2 to 2.5 minutes, and restoring about 30 seconds.
+  - The next run restored it, but Cargo still recompiled every crate (344 of them, including registry crates such as `proc-macro2`). The warm build took longer than the cold one: 11 minutes against 10.
+  - The cause isn't known yet. One run with `CARGO_LOG=cargo::core::compiler::fingerprint=info` would show why Cargo treats the restored artifacts as stale. Until then, the cache costs about 3 minutes per run for no gain.
+
+**Signing and submit work.** Build `3e8dd8fd` was signed with the iPhone Distribution identity (team 24L96WG9A8) and the EAS-managed App Store profile (no device list, `get-task-allow` false). An interactive `eas submit` uploaded it to App Store Connect, which also created the app record (6833494203, now in `eas.json`'s `production` submit profile). The workflow's `submit_ios` job is now on, so each run builds and then uploads with the API key stored on EAS.
+
+**Build numbers** come from EAS remote versioning: `appVersionSource: "remote"` and `autoIncrement` on the `ios-exact` profile. EAS resolves the next number before the job starts. The custom build reads it as `${ eas.job.version.buildNumber }` and passes it to Exact as `EXACT_BUILD_NUMBER`, which Exact writes to `CFBundleVersion` in an `--archive` build (default `1`). `CFBundleShortVersionString` comes from `EXACT_VERSION` (default `0.1.0`). App Store Connect needs the build number to go up with every upload. The custom build calls `eas/install_node_modules` and `eas/resolve_build_config` first. A workflow build job only gets the credentials and the build number once eas-cli resolves them on the worker; an `eas build` from a laptop resolves them before uploading. Watch out: the first remote-versioned build only initializes the counter (to 1, which was already uploaded) and doesn't increment it. The counter is now 1, so the next build gets 2.
+
+**Cache: off.** The steps that worked are kept, commented out, in `.eas/build/ios-exact.yml`, with notes on the likely cause: a freshly installed toolchain, or rustc, RUSTFLAGS or env differing between runs.
 
 ## License
 

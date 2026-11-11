@@ -1,0 +1,24 @@
+# Experimental: the Exact iOS app as one Expo Workflow, build then submit.
+# No `on:` trigger, so it only runs by hand:
+#   npx eas-cli@latest workflow:run .eas/workflows/ios.yml
+# The build job uses the ios-exact profile in eas.json, which runs the custom
+# build in .eas/build/ios-exact.yml (Exact's own script, an unsigned .ipa).
+name: iOS (Exact)
+
+jobs:
+  build_ios:
+    name: Build unsigned .ipa
+    type: build
+    params:
+      platform: ios
+      profile: ios-exact
+
+  # Uploads the build to App Store Connect (app 6833494203, eas.json's
+  # production submit profile) with the API key stored on EAS.
+  submit_ios:
+    name: Submit to App Store Connect
+    needs: [build_ios]
+    type: submit
+    params:
+      build_id: ${{ needs.build_ios.outputs.build_id }}
+      profile: production
