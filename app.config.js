@@ -10,7 +10,6 @@ module.exports = () => ({
   platforms: ['ios'],
   ios: {
     bundleIdentifier: 'com.bkomen.exact-solar-trial',
-    buildNumber: '1',
     infoPlist: { ITSAppUsesNonExemptEncryption: false },
   },
   extra: { eas: { projectId: 'fa4d862e-9fd7-479d-b15f-b6c13ff60fcc' } },
