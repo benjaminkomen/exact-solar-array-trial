@@ -1,0 +1,65 @@
+# DRAFT, not run on EAS. Not referenced by eas.json. The APK path below was
+# checked in a local build (16 MB). Do not run `eas` with this file until the
+# open points below are settled.
+#
+# Shape: the same plain-shell custom build as ios-exact.yml, on a Linux worker.
+# Exact's own script builds the APK (Rust for aarch64-linux-android, then Gradle).
+#
+# Open points (see the notes the Android trial report lists):
+#  - Signing: Exact's Gradle shell signs the release APK with the debug key
+#    (host/android/app/build.gradle.kts). That APK installs on a device but is
+#    not valid for Google Play. Play needs an upload keystore from EAS
+#    (eas.job.secrets.buildCredentials) and a bundle or a re-signed APK.
+#  - Platform 37.2 and build-tools: Gradle downloads them if licences are
+#    accepted; the worker image may not carry them.
+#  - Hermes bundle for aarch64-linux-android comes from hermes-lean-sys.
+#  - EXACT_REF comes from .exact-ref at the repo root.
+build:
+  name: Exact Android (APK)
+  steps:
+    - eas/checkout
+
+    - run:
+        name: Exact checkout and Rust
+        command: |
+          set -euo pipefail
+          EXACT_REF=$(tr -d '[:space:]' < .exact-ref)
+          mkdir -p ../exact && cd ../exact
+          git init -q && git remote add origin https://github.com/expo/exact.git
+          git fetch -q --depth 1 origin "$EXACT_REF" && git checkout -q FETCH_HEAD
+          PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
+          if ! command -v rustup >/dev/null; then
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install "$PIN" --profile minimal --target aarch64-linux-android
+          set-env PATH "$PATH"
+          bun --version
+          java -version
+
+    - run:
+        name: Exact setup (Bun deps, Android Hermes bundle, crates)
+        command: |
+          set -euo pipefail
+          cd ../exact
+          bun install --frozen-lockfile
+          cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target aarch64-linux-android
+          cargo fetch --locked
+
+    - run:
+        name: Build the APK
+        command: |
+          set -euo pipefail
+          export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
+          export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+          # NDK 27.1.12297006 is the one Exact tries first. Platform 37.2
+          # (compileSdk) must be installed: sdkmanager "platforms;android-37.2"
+          # (68 MB). The local build needed no other SDK part.
+          bun exact.mjs android --release
+          ls -lh target/android/app/outputs/apk/release/app-release.apk
+
+    - eas/upload_artifact:
+        name: Upload the APK
+        inputs:
+          type: application-archive
+          path: target/android/app/outputs/apk/release/app-release.apk
