@@ -36,13 +36,15 @@ build:
           PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
           # Exact pins its Bun (packageManager in its package.json). An older Bun
           # cannot read Exact's bun.lock ("lockfile had changes"), so install the
-          # pin when the worker's Bun differs.
+          # pin (the worker image may already have it).
           BUN_PIN=$(sed -n -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"bun@([0-9.]+)".*/\1/p' package.json | head -n 1)
           test -n "$BUN_PIN" || { echo "No packageManager bun@x.y.z in Exact's package.json" >&2; exit 1; }
-          if [ "$(bun --version 2>/dev/null || true)" != "$BUN_PIN" ]; then
-            curl -fsSL https://bun.sh/install | bash -s "bun-v$BUN_PIN"
+          # Installed beside any other Bun, in the folder Exact's launcher looks in.
+          BUN_HOME="$HOME/.bun-$BUN_PIN"
+          if [ ! -x "$BUN_HOME/bin/bun" ]; then
+            curl -fsSL https://bun.sh/install | BUN_INSTALL="$BUN_HOME" bash -s "bun-v$BUN_PIN"
           fi
-          export PATH="$HOME/.bun/bin:$PATH"
+          export PATH="$BUN_HOME/bin:$PATH"
           # Exact's Gradle shell needs JDK 17 or newer.
           java -version 2>&1 | head -n 1 | grep -q -E '"(1[7-9]|[2-9][0-9])\.' || { echo "JDK 17+ is required" >&2; java -version >&2; exit 1; }
           if ! command -v rustup >/dev/null; then
