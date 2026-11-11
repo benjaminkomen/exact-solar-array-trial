@@ -18,6 +18,13 @@ build:
   steps:
     - eas/checkout
 
+    # A workflow build job starts without a resolved version code:
+    # eas/resolve_build_config fills in eas.job (version.versionCode). eas-cli
+    # needs expo-modules-autolinking from node_modules to read the app config.
+    # (A build started with `eas build` resolves it on the laptop instead.)
+    - eas/install_node_modules
+    - eas/resolve_build_config
+
     - run:
         name: Exact checkout and Rust
         command: |
@@ -44,6 +51,22 @@ build:
           bun install --frozen-lockfile
           cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target aarch64-linux-android
           cargo fetch --locked
+
+    # Exact's Android host fixes versionCode = 1 in build.gradle.kts and reads
+    # no variable for it (iOS reads EXACT_BUILD_NUMBER). Until it does, write
+    # the number EAS manages into the checkout, and fail if the line is gone.
+    - run:
+        name: Set the version code (EAS remote version)
+        inputs:
+          version_code: ${ eas.job.version.versionCode }
+        command: |
+          set -euo pipefail
+          GRADLE=../exact/host/android/app/build.gradle.kts
+          CODE="${ inputs.version_code }"
+          case "$CODE" in ''|*[!0-9]*) echo "Version code is not a number: '$CODE'" >&2; exit 1;; esac
+          test "$(grep -c '^        versionCode = 1$' "$GRADLE")" = 1 || { echo "versionCode line not found once in $GRADLE" >&2; exit 1; }
+          sed -i.bak "s/^        versionCode = 1$/        versionCode = $CODE/" "$GRADLE" && rm "$GRADLE.bak"
+          echo "versionCode = $CODE"
 
     - run:
         name: Build the APK

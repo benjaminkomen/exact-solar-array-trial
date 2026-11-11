@@ -16,7 +16,16 @@
       "distribution": "internal",
       "android": {
         "config": "android-exact.yml"
-      }
+      },
+      "autoIncrement": true
+    },
+    "ios-exact-local": {
+      "extends": "ios-exact",
+      "autoIncrement": false
+    },
+    "android-exact-local": {
+      "extends": "android-exact",
+      "autoIncrement": false
     }
   },
   "submit": {
