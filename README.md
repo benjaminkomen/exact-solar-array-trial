@@ -138,14 +138,14 @@ bun exact.mjs ios --no-install
 
 ## iOS build (EAS, experimental)
 
-EAS can build this Exact app as an [Expo Workflow](https://docs.expo.dev/eas/workflows/syntax/). The build is an EAS [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. It doesn't use `eas/build`, prebuild or the `expo` package. It is tried on a free Expo account (45-minute limit), and the result is an unsigned `.ipa`.
+EAS can build this Exact app as an [Expo Workflow](https://docs.expo.dev/eas/workflows/syntax/). The build is an EAS [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. It doesn't use `eas/build`, prebuild or the `expo` package. It is tried on a free Expo account (45-minute limit), and builds an App Store-signed `.ipa` for `com.bkomen.exact-solar-trial` (signing is still blocked, see below).
 
 - [`.eas/workflows/ios.yml`](.eas/workflows/ios.yml) has two jobs:
   - `build_ios` is a `type: build` job (platform `ios`, profile `ios-exact`).
   - `submit_ios` is a `type: submit` job that `needs` the build and takes its `build_id`. It is off (`if: ${{ never() }}`) until there are signing credentials and an App Store Connect app. EAS shows it as skipped.
   - The workflow has no trigger, so it only runs by hand.
-- [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml) is the custom build. It checks out the pinned Exact commit beside the app and installs rustup with the iOS targets (the image has Bun but no Rust). It then installs the Hermes bundles, runs `bun exact.mjs ios --device --archive out.ipa --unsigned` and uploads `out.ipa` as the build's application archive.
-- [`eas.json`](eas.json) defines the profile `ios-exact`, on the `macos-tahoe-26.6-xcode-27.2` image with `withoutCredentials`, plus an empty `production` submit profile.
+- [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml) is the custom build. It checks out the pinned Exact commit beside the app and installs rustup with the iOS targets (the image has Bun but no Rust). It then imports the EAS-managed distribution certificate and App Store profile (`eas.job.secrets.buildCredentials`) into a temporary keychain and installs the Hermes bundles. Finally it runs `bun exact.mjs ios --device --archive out.ipa` with `EXACT_IDENTITY` (the certificate's SHA-1) and `EXACT_PROFILE` (the profile's path), checks the signature with `codesign`, and uploads `out.ipa` as the build's application archive. `eas/configure_ios_credentials` can't be used, because it edits an Xcode project and Exact has none.
+- [`eas.json`](eas.json) defines the profile `ios-exact`, on the `macos-tahoe-26.6-xcode-27.2` image with `store` distribution (EAS-managed credentials), plus an empty `production` submit profile.
 - [`app.config.js`](app.config.js) gives EAS the Expo config it wants (name, slug, bundle id, project id). `app.json` belongs to Exact and has its own schema, so it stays untouched.
 
 ```sh
@@ -164,7 +164,11 @@ What we found:
   - The next run restored it, but Cargo still recompiled every crate (344 of them, including registry crates such as `proc-macro2`). The warm build took longer than the cold one: 11 minutes against 10.
   - The cause isn't known yet. One run with `CARGO_LOG=cargo::core::compiler::fingerprint=info` would show why Cargo treats the restored artifacts as stale. Until then, the cache costs about 3 minutes per run for no gain.
 
-Not done yet: signing and submit. Exact signs on the runner through `EXACT_IDENTITY` and `EXACT_PROFILE`. The next step would be a build step that imports EAS-managed credentials (or a certificate and profile kept as EAS secrets) into a keychain and passes them to Exact instead of `--unsigned`. Then add the App Store Connect app to the `production` submit profile and remove the submit job's `if:` line.
+**Signing status: blocked on credentials.** EAS has no App Store credentials for this project and bundle ID yet. A workflow run fails at the signing step with `Object field "eas.job.secrets.buildCredentials" does not exist`. `eas build --non-interactive` stops earlier with "Credentials are not set up. Run this command again in interactive mode.", because it finds no distribution certificate for `com.bkomen.exact-solar-trial` with store distribution. The fix is to run `npx eas-cli@latest credentials -p ios` once from a checkout of this branch (which uses the new bundle ID): choose the `ios-exact` profile and set up the Distribution Certificate and the App Store provisioning profile. Before that, the profile used internal distribution (ad hoc) and the old `com.example` bundle ID.
+
+**Cache: off.** The steps that worked are kept, commented out, in `.eas/build/ios-exact.yml`, with notes on the likely cause: a freshly installed toolchain, or rustc, RUSTFLAGS or env differing between runs.
+
+Next, after signing works: add the App Store Connect app to the `production` submit profile (or let the first interactive `eas submit` create it), then remove the submit job's `if:` line.
 
 ## License
 
