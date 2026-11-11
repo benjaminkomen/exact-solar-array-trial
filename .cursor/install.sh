@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Idempotent web toolchain for Cursor cloud agents.
-# Pins (Exact commit, Bun) come from .github/workflows/ios.yml.
-# Rust, Hermes, wasm-bindgen and Binaryen versions are read from that Exact checkout.
+# The Exact commit comes from .exact-ref.
+# Bun, Rust, Hermes, wasm-bindgen and Binaryen versions are read from that Exact checkout.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,14 +9,9 @@ cd "$ROOT"
 
 log() { printf '==> %s %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
-EXACT_REF="$(awk '/^[[:space:]]*EXACT_REF:[[:space:]]*/ { print $2; exit }' .github/workflows/ios.yml)"
-BUN_VERSION="$(awk '/^[[:space:]]*BUN_VERSION:[[:space:]]*/ { gsub(/"/, "", $2); print $2; exit }' .github/workflows/ios.yml)"
+EXACT_REF="$(tr -d '[:space:]' < .exact-ref)"
 if [[ ! "$EXACT_REF" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "Could not read EXACT_REF from .github/workflows/ios.yml (got '${EXACT_REF:-}')" >&2
-  exit 1
-fi
-if [[ ! "$BUN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Could not read BUN_VERSION from .github/workflows/ios.yml (got '${BUN_VERSION:-}')" >&2
+  echo "Could not read a 40-character commit from .exact-ref (got '${EXACT_REF:-}')" >&2
   exit 1
 fi
 
@@ -52,15 +47,6 @@ if ! dpkg -s pkg-config >/dev/null 2>&1; then
   sudo apt-get install -y pkg-config
 fi
 
-BUN_HOME="${HOME}/.bun-${BUN_VERSION}"
-if [[ ! -x "${BUN_HOME}/bin/bun" ]] || [[ "$("${BUN_HOME}/bin/bun" --version)" != "$BUN_VERSION" ]]; then
-  log "installing Bun ${BUN_VERSION}"
-  curl -fsSL https://bun.sh/install | BUN_INSTALL="$BUN_HOME" bash -s "bun-v${BUN_VERSION}"
-fi
-sudo ln -sfn "${BUN_HOME}/bin/bun" /usr/local/bin/bun
-export PATH="${BUN_HOME}/bin:${PATH}"
-hash -r
-
 PARENT="$(cd "$ROOT/.." && pwd -P)"
 PARENT="${PARENT%/}"
 EXACT="${PARENT}/exact"
@@ -88,6 +74,21 @@ if [[ "$(git -C "$EXACT" rev-parse HEAD)" != "$EXACT_REF" ]]; then
   echo "Exact checkout is $(git -C "$EXACT" rev-parse HEAD), wanted ${EXACT_REF}" >&2
   exit 1
 fi
+
+# The Bun version is Exact's own pin (packageManager in its package.json).
+BUN_VERSION="$(sed -n -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"bun@([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' "$EXACT/package.json" | head -n 1)"
+if [[ -z "$BUN_VERSION" ]]; then
+  echo "Could not read the Bun version from ${EXACT}/package.json (packageManager)" >&2
+  exit 1
+fi
+BUN_HOME="${HOME}/.bun-${BUN_VERSION}"
+if [[ ! -x "${BUN_HOME}/bin/bun" ]] || [[ "$("${BUN_HOME}/bin/bun" --version)" != "$BUN_VERSION" ]]; then
+  log "installing Bun ${BUN_VERSION}"
+  curl -fsSL https://bun.sh/install | BUN_INSTALL="$BUN_HOME" bash -s "bun-v${BUN_VERSION}"
+fi
+sudo ln -sfn "${BUN_HOME}/bin/bun" /usr/local/bin/bun
+export PATH="${BUN_HOME}/bin:${PATH}"
+hash -r
 
 if [[ ! -d "$EXACT/node_modules" ]]; then
   log "bun install in Exact"

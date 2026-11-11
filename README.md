@@ -106,7 +106,7 @@ The native GPU test needs a Vulkan driver. On a Linux box without one, Chrome's 
 
 Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update` refreshes the generated files against your checkout.
 
-Cursor cloud agents use [`.cursor/environment.json`](.cursor/environment.json). Its install script clones the Exact commit pinned in [`.github/workflows/ios.yml`](.github/workflows/ios.yml) beside this repo, installs the Rust, Bun and Chrome that checkout requires, fetches the attested Hermes bundles and Cargo crates, and warms `bun exact.mjs test web` so `target/` is already built. A later run skips work that is already present. Feedback uploads stay off.
+Cursor cloud agents use [`.cursor/environment.json`](.cursor/environment.json). Its install script clones the Exact commit pinned in [`.exact-ref`](.exact-ref) beside this repo, installs the Rust, Bun and Chrome that checkout requires, fetches the attested Hermes bundles and Cargo crates, and warms `bun exact.mjs test web` so `target/` is already built. A later run skips work that is already present. Feedback uploads stay off.
 
 ## Deploying the demo
 

@@ -1,6 +1,6 @@
 # Experimental: build and sign the Exact iOS app on EAS Build with plain shell
 # steps. No eas/build, no prebuild, no node_modules: Exact's own script makes
-# the .ipa. Mirrors .github/workflows/ios.yml. EXACT_REF must match that pin.
+# the .ipa. Mirrors .github/workflows/ios.yml. The Exact commit comes from .exact-ref.
 #
 # Signing: EAS hands the managed App Store credentials (distribution
 # certificate .p12 and provisioning profile) to the job as
@@ -33,7 +33,7 @@ build:
         name: Exact checkout and Rust
         command: |
           set -euo pipefail
-          EXACT_REF=1bdedcb30ffcb3a1dd8a181ba4ac16cb4f41ce19
+          EXACT_REF=$(tr -d '[:space:]' < .exact-ref)
           xcodebuild -version
           # The app's Cargo.toml patches crates from ../exact/vendor, so Exact sits beside the app.
           mkdir -p ../exact && cd ../exact
