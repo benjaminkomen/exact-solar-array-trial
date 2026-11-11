@@ -74,6 +74,7 @@ if [[ "$(git -C "$EXACT" rev-parse HEAD)" != "$EXACT_REF" ]]; then
   echo "Exact checkout is $(git -C "$EXACT" rev-parse HEAD), wanted ${EXACT_REF}" >&2
   exit 1
 fi
+bash "$ROOT/scripts/normalize-mtimes.sh" "$EXACT"
 
 # The Bun version is Exact's own pin (packageManager in its package.json).
 BUN_VERSION="$(sed -n -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"bun@([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' "$EXACT/package.json" | head -n 1)"

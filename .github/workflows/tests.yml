@@ -25,7 +25,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Where install.sh puts Exact
+        run: echo "EXACT_DIR=$(dirname "$GITHUB_WORKSPACE")/exact" >> "$GITHUB_ENV"
+
+      # Cargo's build output (Exact's target/ and this app's), the downloaded
+      # crates, toolchains, Hermes bundles and wasm-bindgen. install.sh puts the
+      # Exact checkout beside this one and sets its file times to its commit
+      # time (scripts/normalize-mtimes.sh), so the restored target/ stays fresh.
+      - name: Restore caches
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.EXACT_DIR }}/target
+            ${{ github.workspace }}/target
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/hermes-lean-sys
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cache/exact
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+          key: tests-${{ runner.os }}-${{ hashFiles('.exact-ref', 'Cargo.lock') }}
+          restore-keys: tests-${{ runner.os }}-
 
       - name: Toolchain, then UI tests (bun exact.mjs test web)
         run: bash .cursor/install.sh
@@ -43,3 +67,20 @@ jobs:
           mkdir -p "$EXACT_GPU_OUT"
           cargo test --locked -p exact-solar-trial-gpu
           ls "$EXACT_GPU_OUT"/roof-noon* "$EXACT_GPU_OUT"/roof-dusk*
+
+      # Saved even when a test fails, so a red run still warms the next one.
+      - name: Save caches
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.EXACT_DIR }}/target
+            ${{ github.workspace }}/target
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/hermes-lean-sys
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cache/exact
+            ~/.rustup/toolchains
+            ~/.rustup/update-hashes
+          key: tests-${{ runner.os }}-${{ hashFiles('.exact-ref', 'Cargo.lock') }}

@@ -51,7 +51,7 @@ jobs:
         working-directory: app
     steps:
       - name: Checkout this app
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: app
 
@@ -59,11 +59,14 @@ jobs:
         run: echo "EXACT_REF=$(tr -d '[:space:]' < .exact-ref)" >> "$GITHUB_ENV"
 
       - name: Checkout Exact
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: expo/exact
           ref: ${{ env.EXACT_REF }}
           path: exact
+
+      - name: Fix file times of the Exact checkout (keeps the Cargo cache fresh)
+        run: bash scripts/normalize-mtimes.sh ../exact
 
       - name: Show Xcode
         working-directory: ${{ github.workspace }}
@@ -108,7 +111,7 @@ jobs:
       # two runs reinstalling the bundles each time.
       - name: Restore Hermes bundles
         id: hermes-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cargo/hermes-lean-sys
           key: hermes-${{ env.EXACT_REF }}-${{ runner.os }}-aarch64-apple-ios-sim
@@ -133,7 +136,7 @@ jobs:
 
       - name: Save Hermes bundles
         if: always() && steps.hermes-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cargo/hermes-lean-sys
           key: hermes-${{ env.EXACT_REF }}-${{ runner.os }}-aarch64-apple-ios-sim
@@ -162,7 +165,7 @@ jobs:
           ls -lh artifacts
 
       - name: Upload unsigned .ipa
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ExactSolarTrial-ios-ipa
           path: |
@@ -174,7 +177,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Simulator .app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ExactSolarTrial-ios-simulator
           path: app/artifacts/ExactSolarTrial-simulator.app.zip

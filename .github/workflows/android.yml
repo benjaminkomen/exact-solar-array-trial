@@ -65,7 +65,7 @@ jobs:
         working-directory: app
     steps:
       - name: Checkout this app
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: app
 
@@ -77,11 +77,14 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Exact
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: expo/exact
           ref: ${{ steps.pin.outputs.ref }}
           path: exact
+
+      - name: Fix file times of the Exact checkout (keeps the Cargo cache fresh)
+        run: bash scripts/normalize-mtimes.sh ../exact
 
       - name: Read Exact's Bun version
         id: bun
@@ -116,7 +119,7 @@ jobs:
 
       - name: Restore Hermes bundles
         id: hermes-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cargo/hermes-lean-sys
           key: hermes-${{ steps.pin.outputs.ref }}-${{ runner.os }}-aarch64-linux-android
@@ -136,7 +139,7 @@ jobs:
 
       - name: Save Hermes bundles
         if: always() && steps.hermes-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cargo/hermes-lean-sys
           key: hermes-${{ steps.pin.outputs.ref }}-${{ runner.os }}-aarch64-linux-android
@@ -160,7 +163,7 @@ jobs:
         run: tail -n 200 build.log || true
 
       - name: Upload the APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ExactSolarTrial-android-apk
           path: app/artifacts/ExactSolarTrial.apk
