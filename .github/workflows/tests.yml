@@ -45,7 +45,8 @@ jobs:
             ~/.cargo/git
             ~/.cargo/hermes-lean-sys
             ~/.cargo/bin/wasm-bindgen
-            ~/.cache/exact
+            ~/.cache/exact/binaryen
+            ~/.cache/exact/web-modules
             ~/.rustup/toolchains
             ~/.rustup/update-hashes
           key: tests-${{ runner.os }}-${{ hashFiles('.exact-ref', 'Cargo.lock') }}
@@ -80,7 +81,8 @@ jobs:
             ~/.cargo/git
             ~/.cargo/hermes-lean-sys
             ~/.cargo/bin/wasm-bindgen
-            ~/.cache/exact
+            ~/.cache/exact/binaryen
+            ~/.cache/exact/web-modules
             ~/.rustup/toolchains
             ~/.rustup/update-hashes
           key: tests-${{ runner.os }}-${{ hashFiles('.exact-ref', 'Cargo.lock') }}

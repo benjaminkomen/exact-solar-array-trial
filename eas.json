@@ -15,7 +15,8 @@
     "android-exact": {
       "distribution": "internal",
       "android": {
-        "config": "android-exact.yml"
+        "config": "android-exact.yml",
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-58"
       },
       "autoIncrement": true
     },
