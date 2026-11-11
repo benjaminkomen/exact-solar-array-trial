@@ -31,6 +31,9 @@ build:
           rustup toolchain install "$PIN" --profile minimal --target aarch64-apple-ios,aarch64-apple-ios-sim
           rustc "+$PIN" --version
           set-env PATH "$PATH"
+          # eas/save_cache fails the whole save ("Failed to resolve paths") when any path is missing.
+          # Exact may not create ~/.cache/exact for this build, so make sure it exists.
+          mkdir -p "$HOME/.cache/exact"
                     bun --version
 
     - eas/restore_cache:
@@ -75,35 +78,6 @@ build:
             ${ eas.env.HOME }/.cargo/hermes-lean-sys
             ${ eas.env.HOME }/.cargo/registry
             ${ eas.env.HOME }/.cache/exact
-
-    # TEMPORARY probe (one build only): prove the cache round-trips and time a warm build.
-    - run:
-        name: Probe - wipe cached dirs and make sources look freshly checked out
-        command: |
-          set -euo pipefail
-          du -sh ~/workingdir/build/target ~/workingdir/exact/target ~/.cargo/hermes-lean-sys ~/.cargo/registry ~/.cache/exact 2>/dev/null || true
-          rm -rf ~/workingdir/build/target ~/workingdir/exact/target ~/.cargo/hermes-lean-sys ~/.cargo/registry ~/.cache/exact
-          find ~/workingdir/build ~/workingdir/exact -path '*/node_modules' -prune -o -path '*/.git' -prune -o -type f -exec touch {} +
-          mv out.ipa first.ipa
-    - eas/restore_cache:
-        name: Probe - restore this build's cache
-        inputs:
-          key: exact-ios-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-          path: |
-            ${ eas.env.HOME }/workingdir/build/target
-            ${ eas.env.HOME }/workingdir/exact/target
-            ${ eas.env.HOME }/.cargo/hermes-lean-sys
-            ${ eas.env.HOME }/.cargo/registry
-            ${ eas.env.HOME }/.cache/exact
-    - run:
-        name: Probe - warm rebuild
-        command: |
-          set -euo pipefail
-          export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
-          START=$(date +%s)
-          bun exact.mjs ios --device --archive "$PWD/out.ipa" --unsigned
-          echo "PROBE warm rebuild seconds: $(( $(date +%s) - START ))"
-          ls -lh out.ipa first.ipa
 
     - eas/upload_artifact:
         name: Upload unsigned .ipa

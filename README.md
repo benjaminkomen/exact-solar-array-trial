@@ -118,7 +118,7 @@ Exact's router has no base path, and a trailing slash matches no route. To work 
 
 ## iOS build (GitHub Actions)
 
-EAS Build does not support Exact yet. Exact is not a React Native project, and its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode. Putting that on EAS would mean installing those tools on Expo's workers by hand. This repo uses a GitHub Actions workflow instead: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's `xcode-27` runner. Exact's own CI uses `macos-26`, but that image's default Xcode cannot compile Exact's Swift host (it references APIs such as `UIArrangementViewController` that the older SDK does not include). Exact does not build iOS apps in its own CI.
+Exact is not a React Native project. Its iOS app is built by Exact's own script (`bun exact.mjs ios`), which needs Rust, Bun and Xcode, so EAS Build's standard build does not apply. An experimental EAS custom build is described in the next section. This repo's main iOS build is a GitHub Actions workflow: [`.github/workflows/ios.yml`](.github/workflows/ios.yml), on GitHub's `xcode-27` runner. Exact's own CI uses `macos-26`, but that image's default Xcode cannot compile Exact's Swift host (it references APIs such as `UIArrangementViewController` that the older SDK does not include). Exact does not build iOS apps in its own CI.
 
 The workflow checks out a pinned Exact commit (Exact is pre-alpha and changes daily), installs the Rust toolchain and iOS targets Exact pins, Bun, and the attested Hermes bundles Exact's README describes, then builds:
 
@@ -135,6 +135,27 @@ To build the same way on a Mac, with Exact checked out next to this repo:
 bun exact.mjs ios --device --archive ExactSolarTrial.ipa --unsigned
 bun exact.mjs ios --no-install
 ```
+
+## iOS build (EAS, experimental)
+
+EAS Build can build this Exact app. It uses a [custom build](https://docs.expo.dev/custom-builds/schema/) made of plain shell steps, the same recipe as the GitHub Actions workflow. There is no `eas/build`, no prebuild and no `expo` package. It is tried on a free Expo account (45-minute limit), and the result is an unsigned `.ipa`.
+
+- [`.eas/build/ios-exact.yml`](.eas/build/ios-exact.yml): checks out the pinned Exact commit beside the app, installs rustup with the iOS targets (the image has Bun but no Rust), installs the Hermes bundles, runs `bun exact.mjs ios --device --archive out.ipa --unsigned` and uploads `out.ipa` as the build's application archive.
+- [`eas.json`](eas.json): profile `ios-exact` on the `macos-tahoe-26.6-xcode-27.2` image, with `withoutCredentials`.
+- [`app.config.js`](app.config.js): the Expo config EAS wants (name, slug, bundle id, project id). `app.json` belongs to Exact and has its own schema, so it stays untouched.
+
+```sh
+npx eas-cli@latest build -p ios --profile ios-exact
+```
+
+What we found:
+
+- **It's fast.** A cold build took about 7 minutes on EAS's M4 Pro worker, against about 37 minutes cold on GitHub's `xcode-27` runner. The worker setup (Exact checkout, rustup, Hermes, crates) took about a minute, Rust took 324 s and Swift 32 s. The `.ipa` was 15 MB and showed up as the build's downloadable artifact.
+- **One workaround:** `eas build` resolves iOS entitlements locally and fails with "Cannot find 'expo-modules-autolinking' package in your project" when no Expo packages are installed. A devDependency on `expo-modules-autolinking` alone fixes that, without `expo` or React Native.
+- **A harmless warning:** at the end of the build the worker logs "Failed to read the app config file with `expo config` command: The `expo` package was not found." under "Unknown build phase". The build still finishes and uploads the `.ipa`. We left it alone rather than add `expo`.
+- **Caching:** in a build job, `eas/save_build_cache` and `eas/restore_build_cache` only handle ccache and CocoaPods. They ignore `key` and `path`, and the step still reports success. The generic `eas/save_cache` and `eas/restore_cache` take paths, so the config caches the app's `target/`, Exact's `target/`, the Hermes bundles, the Cargo registry and `~/.cache/exact` with those. A warm build hasn't been confirmed yet. On the one try, the save failed with "Path does not exist: /Users/expo/.cache/exact", because Exact never created that directory and one missing path aborts the whole save. The step still reports success. The config now creates the directory first. Size is the open question: the cold build leaves about 4 GB (app `target/` 2.1 GB, Exact `target/` 1.1 GB, Cargo registry 714 MB, Hermes 101 MB). At about 7 minutes cold, caching matters less here than on GitHub Actions.
+
+Not done yet: signing and `eas submit`. Exact signs on the runner through `EXACT_IDENTITY` and `EXACT_PROFILE`, so the next step would be a build step that imports EAS-managed credentials (or a certificate and profile kept as EAS secrets) into a keychain and passes them to Exact instead of `--unsigned`. `eas submit` could then pick up the archive.
 
 ## License
 
