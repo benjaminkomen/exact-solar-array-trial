@@ -1,0 +1,155 @@
+# Build the Exact Android app (a release APK) on a GitHub-hosted Linux runner.
+#
+# Exact's own script makes the APK: bun exact.mjs android. With no device
+# attached it builds and says so, which is what a runner needs. There is no
+# emulator step: the APK is arm64 and the hosted x86 runners cannot run it fast.
+# The UI tests run in tests.yml on the web host, and `test android` runs on a
+# developer machine with an emulator.
+#
+# The APK is signed with Exact's debug key (host/android/app/build.gradle.kts).
+# It installs on a device. Google Play does not accept it.
+#
+# The Exact commit comes from .exact-ref, and the Bun and Rust versions from
+# that Exact checkout.
+name: Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.contract"
+      - "app.ts"
+      - "app.json"
+      - "assets/**"
+      - "gpu/**"
+      - "android/**"
+      - "linux/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "exact.mjs"
+      - ".exact-ref"
+      - ".github/workflows/android.yml"
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  EXACT_FEEDBACK: "0"
+  ANDROID_PLATFORM: "37.2"
+  ANDROID_NDK: "27.1.12297006"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout this app
+        uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Read the Exact pin
+        id: pin
+        run: |
+          ref=$(tr -d '[:space:]' < .exact-ref)
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo ".exact-ref is not a 40-character commit" >&2; exit 1; }
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Exact
+        uses: actions/checkout@v4
+        with:
+          repository: expo/exact
+          ref: ${{ steps.pin.outputs.ref }}
+          path: exact
+
+      - name: Read Exact's Bun version
+        id: bun
+        working-directory: ${{ github.workspace }}
+        run: echo "version=$(jq -r '.packageManager | sub("^bun@"; "")' exact/package.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Rust (Exact's rust-toolchain.toml) and the Android target
+        working-directory: ${{ github.workspace }}/exact
+        run: |
+          PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$PIN" --profile minimal --target aarch64-linux-android
+          rustc "+$PIN" --version
+
+      - name: Android SDK platform and NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-${ANDROID_PLATFORM}" "ndk;${ANDROID_NDK}"
+          echo "JAVA_HOME=$JAVA_HOME"; java -version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: exact
+          cache-directories: |
+            ${{ github.workspace }}/app/target
+          prefix-key: android-${{ steps.pin.outputs.ref }}
+          cache-on-failure: true
+
+      - name: Restore Hermes bundles
+        id: hermes-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cargo/hermes-lean-sys
+          key: hermes-${{ steps.pin.outputs.ref }}-${{ runner.os }}-aarch64-linux-android
+
+      - name: Bun dependencies
+        working-directory: ${{ github.workspace }}/exact
+        run: bun install --frozen-lockfile
+
+      - name: Hermes bundles
+        working-directory: ${{ github.workspace }}/exact
+        run: |
+          install() {
+            cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target "$1"
+          }
+          install x86_64-unknown-linux-gnu
+          install aarch64-linux-android
+
+      - name: Save Hermes bundles
+        if: always() && steps.hermes-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cargo/hermes-lean-sys
+          key: hermes-${{ steps.pin.outputs.ref }}-${{ runner.os }}-aarch64-linux-android
+
+      - name: Cargo crates
+        working-directory: ${{ github.workspace }}/exact
+        run: cargo fetch --locked
+
+      - name: Build the release APK
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          bun exact.mjs android --json 2>build.log | tee result.json
+          cat result.json
+          APK=$(jq -r '.path' result.json)
+          test -f "$APK"
+          cp "$APK" artifacts/ExactSolarTrial.apk
+          ls -lh artifacts
+
+      - name: Show the build log on failure
+        if: failure()
+        run: tail -n 200 build.log || true
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExactSolarTrial-android-apk
+          path: app/artifacts/ExactSolarTrial.apk
+          if-no-files-found: error
+          retention-days: 14
