@@ -164,11 +164,11 @@ What we found:
   - The next run restored it, but Cargo still recompiled every crate (344 of them, including registry crates such as `proc-macro2`). The warm build took longer than the cold one: 11 minutes against 10.
   - The cause isn't known yet. One run with `CARGO_LOG=cargo::core::compiler::fingerprint=info` would show why Cargo treats the restored artifacts as stale. Until then, the cache costs about 3 minutes per run for no gain.
 
-**Signing status: blocked on credentials.** EAS has no App Store credentials for this project and bundle ID yet. A workflow run fails at the signing step with `Object field "eas.job.secrets.buildCredentials" does not exist`. `eas build --non-interactive` stops earlier with "Credentials are not set up. Run this command again in interactive mode.", because it finds no distribution certificate for `com.bkomen.exact-solar-trial` with store distribution. The fix is to run `npx eas-cli@latest credentials -p ios` once from a checkout of this branch (which uses the new bundle ID): choose the `ios-exact` profile and set up the Distribution Certificate and the App Store provisioning profile. Before that, the profile used internal distribution (ad hoc) and the old `com.example` bundle ID.
+**Signing and submit work.** Build `3e8dd8fd` was signed with the iPhone Distribution identity (team 24L96WG9A8) and the EAS-managed App Store profile (no device list, `get-task-allow` false). An interactive `eas submit` uploaded it to App Store Connect, which also created the app record (6833494203, now in `eas.json`'s `production` submit profile). The workflow's `submit_ios` job is now on, so each run builds and then uploads with the API key stored on EAS.
+
+**Build numbers** come from EAS remote versioning: `appVersionSource: "remote"` and `autoIncrement` on the `ios-exact` profile. EAS resolves the next number before the job starts. The custom build reads it as `${ eas.job.version.buildNumber }` and passes it to Exact as `EXACT_BUILD_NUMBER`, which Exact writes to `CFBundleVersion` in an `--archive` build (default `1`). `CFBundleShortVersionString` comes from `EXACT_VERSION` (default `0.1.0`). App Store Connect needs the build number to go up with every upload.
 
 **Cache: off.** The steps that worked are kept, commented out, in `.eas/build/ios-exact.yml`, with notes on the likely cause: a freshly installed toolchain, or rustc, RUSTFLAGS or env differing between runs.
-
-Next, after signing works: add the App Store Connect app to the `production` submit profile (or let the first interactive `eas submit` create it), then remove the submit job's `if:` line.
 
 ## License
 

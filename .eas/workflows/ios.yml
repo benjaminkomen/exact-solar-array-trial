@@ -13,15 +13,11 @@ jobs:
       platform: ios
       profile: ios-exact
 
-  # Disabled: there are no signing credentials or App Store Connect record yet,
-  # and the build makes an unsigned .ipa that App Store Connect would refuse.
-  # To turn it on, sign in the custom build (EXACT_IDENTITY and EXACT_PROFILE
-  # instead of --unsigned), add the App Store Connect app to eas.json's
-  # submit profile, and delete the `if:` line.
+  # Uploads the build to App Store Connect (app 6833494203, eas.json's
+  # production submit profile) with the API key stored on EAS.
   submit_ios:
     name: Submit to App Store Connect
     needs: [build_ios]
-    if: ${{ never() }}
     type: submit
     params:
       build_id: ${{ needs.build_ios.outputs.build_id }}

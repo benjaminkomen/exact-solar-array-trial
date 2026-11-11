@@ -117,6 +117,12 @@ build:
         command: |
           set -euo pipefail
           export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
+          # CFBundleVersion: EAS remote versioning (appVersionSource "remote",
+          # autoIncrement) resolves the next build number before the job starts
+          # and hands it over as eas.job.version.buildNumber. Exact reads it
+          # from EXACT_BUILD_NUMBER (default 1) in an --archive build.
+          export EXACT_BUILD_NUMBER="${ eas.job.version.buildNumber }"
+          echo "Build number (CFBundleVersion): $EXACT_BUILD_NUMBER"
           bun exact.mjs ios --device --archive "$PWD/out.ipa"
           ls -lh out.ipa
 
