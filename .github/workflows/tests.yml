@@ -1,0 +1,45 @@
+# Runs the app's tests on every pull request: the UI tests in app.test.contract
+# (bun exact.mjs test web) and the roof GPU readback test.
+# It uses GitHub's Linux runner, so it spends no EAS builds.
+#
+# .cursor/install.sh sets up the Linux toolchain from the Exact commit in
+# .exact-ref and ends by running `bun exact.mjs test web`.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  EXACT_FEEDBACK: "0"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain, then UI tests (bun exact.mjs test web)
+        run: bash .cursor/install.sh
+
+      # No GPU on the runner: Chrome's bundled SwiftShader is the Vulkan driver.
+      # The test skips when it finds no adapter, so the step then checks that
+      # the pictures it saves exist.
+      - name: Roof GPU test (SwiftShader)
+        env:
+          VK_ICD_FILENAMES: /opt/google/chrome/vk_swiftshader_icd.json
+          LD_LIBRARY_PATH: /opt/google/chrome
+          EXACT_GPU_OUT: ${{ runner.temp }}/gpu
+        run: |
+          sudo apt-get install -y libvulkan1
+          mkdir -p "$EXACT_GPU_OUT"
+          cargo test --locked -p exact-solar-trial-gpu
+          ls "$EXACT_GPU_OUT"/roof-noon* "$EXACT_GPU_OUT"/roof-dusk*
