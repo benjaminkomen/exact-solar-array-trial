@@ -8,6 +8,10 @@ module.exports = () => ({
   owner: 'bkomen',
   version: '0.1.0',
   platforms: ['ios'],
-  ios: { bundleIdentifier: 'com.example.exact-solar-trial-4c9ea2', buildNumber: '1' },
+  ios: {
+    bundleIdentifier: 'com.example.exact-solar-trial-4c9ea2',
+    buildNumber: '1',
+    infoPlist: { ITSAppUsesNonExemptEncryption: false },
+  },
   extra: { eas: { projectId: 'fa4d862e-9fd7-479d-b15f-b6c13ff60fcc' } },
 });
