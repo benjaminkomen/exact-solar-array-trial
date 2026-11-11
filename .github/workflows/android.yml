@@ -149,9 +149,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          bun exact.mjs android --json 2>build.log | tee result.json
-          cat result.json
-          APK=$(jq -r '.path' result.json)
+          bun exact.mjs android 2>&1 | tee build.log
+          APK=target/android/app/outputs/apk/release/app-release.apk
           test -f "$APK"
           cp "$APK" artifacts/ExactSolarTrial.apk
           ls -lh artifacts
