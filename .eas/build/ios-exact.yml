@@ -9,13 +9,12 @@
 # them into a temporary keychain itself and passes Exact EXACT_IDENTITY (the
 # certificate's SHA-1) and EXACT_PROFILE (the profile's path).
 #
-# Caching is off. eas/save_cache and eas/restore_cache round-trip the Rust
-# targets (1.3 GB), but Cargo still recompiled every crate on the next run, so
-# the cache cost about 3 minutes and saved nothing. Likely causes to look at
-# later: rustup installing the toolchain fresh each run (same version, new
-# install), or rustc, RUSTFLAGS or env differing between runs; one run with
-# CARGO_LOG=cargo::core::compiler::fingerprint=info would show which. The
-# steps that worked are kept at the bottom of this file, commented out.
+# Cache (eas/restore_cache, eas/save_cache): the Rust targets, the crates, the
+# toolchain and the Hermes bundles. The key names the Exact commit and the app's
+# Cargo.lock, and there is no fallback key, so a cache from another Exact commit
+# is never restored (Exact's guidance: Cargo may rebuild path crates when file
+# times change, and a clean build must work without the cache). Not yet shown
+# on EAS: the second build with the same pin is the measure.
 build:
   name: Exact iOS (signed App Store .ipa)
   steps:
@@ -29,11 +28,24 @@ build:
     - eas/install_node_modules
     - eas/resolve_build_config
 
+    - eas/restore_cache:
+        inputs:
+          key: exact-ios-v2-${ hashFiles('.exact-ref', 'Cargo.lock') }
+          path: |
+            ${ eas.env.HOME }/workingdir/build/target
+            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/.cargo/registry
+            ${ eas.env.HOME }/.cargo/git
+            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+            ${ eas.env.HOME }/.rustup/toolchains
+            ${ eas.env.HOME }/.cache/exact
+
     - run:
         name: Exact checkout and Rust
         command: |
           set -euo pipefail
           EXACT_REF=$(tr -d '[:space:]' < .exact-ref)
+          APP="$PWD"
           xcodebuild -version
           # The app's Cargo.toml patches crates from ../exact/vendor, so Exact sits beside the app.
           mkdir -p ../exact && cd ../exact
@@ -136,6 +148,24 @@ build:
           bun exact.mjs ios --device --archive "$PWD/out.ipa"
           ls -lh out.ipa
 
+    # Every path must exist before saving, or the whole save aborts.
+    - run:
+        name: Create the cache folders
+        command: |
+          mkdir -p "$HOME/workingdir/build/target" "$HOME/workingdir/exact/target" "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cargo/hermes-lean-sys" "$HOME/.rustup/toolchains" "$HOME/.cache/exact"
+    - eas/save_cache:
+        if: ${ success() }
+        inputs:
+          key: exact-ios-v2-${ hashFiles('.exact-ref', 'Cargo.lock') }
+          path: |
+            ${ eas.env.HOME }/workingdir/build/target
+            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/.cargo/registry
+            ${ eas.env.HOME }/.cargo/git
+            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+            ${ eas.env.HOME }/.rustup/toolchains
+            ${ eas.env.HOME }/.cache/exact
+
     - run:
         name: Verify the signature
         command: |
@@ -164,23 +194,3 @@ build:
         inputs:
           type: application-archive
           path: out.ipa
-
-# Cache steps (off, see the note at the top). They go after "Exact checkout and
-# Rust" and after the build. Make sure every path exists before saving
-# (mkdir -p "$HOME/.cache/exact"): one missing path aborts the whole save.
-#
-#    - eas/restore_cache:
-#        inputs:
-#          key: exact-ios-1bdedcb3-none
-#          restore_keys: exact-ios-1bdedcb3-
-#          path: |
-#            ${ eas.env.HOME }/workingdir/build/target
-#            ${ eas.env.HOME }/workingdir/exact/target
-#            ${ eas.env.HOME }/.cargo/hermes-lean-sys
-#            ${ eas.env.HOME }/.cargo/registry
-#            ${ eas.env.HOME }/.cache/exact
-#    - eas/save_cache:
-#        if: ${ always() }
-#        inputs:
-#          key: exact-ios-1bdedcb3-${ eas.env.EAS_BUILD_ID }
-#          path: (same list)

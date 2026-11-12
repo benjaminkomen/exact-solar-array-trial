@@ -1,126 +1,91 @@
-# Experimental: build the Exact Android app (a release APK) on EAS Build with
-# plain shell steps, like ios-exact.yml. Exact's own script builds the APK
-# (Rust for aarch64-linux-android, then Gradle).
+# Build the Exact Android app (a release APK) on EAS Build with plain shell
+# steps, following Exact's EAS Android recipe (docs/recipes/eas-android.md in
+# the Exact commit named by .exact-ref). Exact's script builds the APK (Rust for
+# aarch64-linux-android, then Gradle) and reads EXACT_BUILD_NUMBER and
+# EXACT_VERSION for versionCode and versionName. The APK is signed with the
+# debug key: it installs on a device but Google Play does not take it. The
+# Play build is android-exact-store.yml.
 #
-# Run so far: `eas build -p android -e android-exact --local` on a Mac (exit 0,
-# 16 MB APK, debug-signed). Not run on EAS's cloud workers yet.
-#
-# Open points:
-#  - Signing: Exact's Gradle shell signs the release APK with the debug key
-#    (host/android/app/build.gradle.kts). That APK installs on a device but is
-#    not valid for Google Play. Play needs an upload keystore from EAS
-#    (eas.job.secrets.buildCredentials) and a bundle or a re-signed APK.
-#  - Platform 37.2 and the NDK: Gradle downloads parts if licences are
-#    accepted; the worker image may not carry them.
-#  - The Exact commit comes from .exact-ref at the repo root.
+# Production update trust needs either update signing keys or no Exact
+# updates; app.json sets deploy.store.linux to "0" (no updates).
 build:
   name: Exact Android (APK)
   steps:
     - eas/checkout
 
     # A workflow build job starts without a resolved version code:
-    # eas/resolve_build_config fills in eas.job (version.versionCode). eas-cli
-    # needs expo-modules-autolinking from node_modules to read the app config.
-    # (A build started with `eas build` resolves it on the laptop instead.)
+    # eas/resolve_build_config fills in eas.job. eas-cli needs
+    # expo-modules-autolinking from node_modules to read the app config.
     - eas/install_node_modules
     - eas/resolve_build_config
 
-    - run:
-        name: Exact checkout and Rust
-        command: |
-          set -euo pipefail
-          EXACT_REF=$(tr -d '[:space:]' < .exact-ref)
-          mkdir -p ../exact && cd ../exact
-          git init -q && git remote add origin https://github.com/expo/exact.git
-          git fetch -q --depth 1 origin "$EXACT_REF" && git checkout -q FETCH_HEAD
-          PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
-          # Exact pins its Bun (packageManager in its package.json). An older Bun
-          # cannot read Exact's bun.lock ("lockfile had changes"), so install the
-          # pin (the worker image may already have it).
-          BUN_PIN=$(sed -n -E 's/.*"packageManager"[[:space:]]*:[[:space:]]*"bun@([0-9.]+)".*/\1/p' package.json | head -n 1)
-          test -n "$BUN_PIN" || { echo "No packageManager bun@x.y.z in Exact's package.json" >&2; exit 1; }
-          # Installed beside any other Bun, in the folder Exact's launcher looks in.
-          BUN_HOME="$HOME/.bun-$BUN_PIN"
-          if [ ! -x "$BUN_HOME/bin/bun" ]; then
-            curl -fsSL https://bun.sh/install | BUN_INSTALL="$BUN_HOME" bash -s "bun-v$BUN_PIN"
-          fi
-          export PATH="$BUN_HOME/bin:$PATH"
-          # Exact's Gradle shell needs JDK 17 or newer.
-          java -version 2>&1 | head -n 1 | grep -q -E '"(1[7-9]|[2-9][0-9])\.' || { echo "JDK 17+ is required" >&2; java -version >&2; exit 1; }
-          if ! command -v rustup >/dev/null; then
-            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
-          fi
-          export PATH="$HOME/.cargo/bin:$PATH"
-          rustup toolchain install "$PIN" --profile minimal --target aarch64-linux-android
-          set-env PATH "$PATH"
-          bun --version
-          java -version
+    # Cache: only entries that name the Exact commit, the app's lockfile and the
+    # build mode. No fallback key: a cache from another Exact commit is never
+    # restored. A hit saves the crates.io compiles, not the path crates (Cargo
+    # may still rebuild those, as the checkout gets new file times). A clean
+    # build works without any of this.
+    - eas/restore_cache:
+        inputs:
+          key: exact-android-v2-apk-${ hashFiles('.exact-ref', 'Cargo.lock') }
+          path: |
+            ${ eas.env.HOME }/workingdir/build/target
+            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/.cargo/registry
+            ${ eas.env.HOME }/.cargo/git
+            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+            ${ eas.env.HOME }/.rustup/toolchains
 
     - run:
-        name: Exact setup (Bun deps, Android Hermes bundle, crates)
-        command: |
-          set -euo pipefail
-          cd ../exact
-          bun install --frozen-lockfile
-          cargo run --locked --manifest-path vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml -- --target aarch64-linux-android
-          cargo fetch --locked
+        name: Prepare Exact (checkout, Bun deps, Rust, Hermes)
+        shell: /bin/sh
+        command: sh .ci/prepare-native.sh android
 
-    # Exact compiles against Android platform 37.2 and tries NDK 27.1 first. The
-    # worker image may not carry them, so install what is missing (68 MB for the
-    # platform). Licences are accepted for the SDK parts Gradle fetches.
+    # The image may lack these. The setup check below names what is missing.
     - run:
-        name: Android SDK platform and NDK
+        name: Android SDK platform, build-tools and NDK
         command: |
           set -euo pipefail
-          echo "ANDROID_HOME=${ANDROID_HOME:-unset}  ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
           SDKM="$(command -v sdkmanager || true)"
           if [ -z "$SDKM" ]; then SDKM="$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1 || true)"; fi
-          if [ -z "$SDKM" ]; then
-            echo "No sdkmanager found. SDK folder ($SDK) holds:" >&2
-            ls -la "$SDK" >&2 || true
-            exit 1
-          fi
-          echo "sdkmanager: $SDKM"
+          [ -n "$SDKM" ] || { echo "No sdkmanager under $SDK" >&2; ls -la "$SDK" >&2 || true; exit 1; }
           yes | "$SDKM" --sdk_root="$SDK" --licenses >/dev/null || true
-          "$SDKM" --sdk_root="$SDK" "platforms;android-37.2" "ndk;27.1.12297006"
-          ls "$SDK/platforms" "$SDK/ndk"
+          "$SDKM" --sdk_root="$SDK" "platforms;android-37.2" "build-tools;37.0.0" "ndk;27.1.12297006"
           set-env ANDROID_HOME "$SDK"
 
-    # Exact's Android host fixes versionCode = 1 in build.gradle.kts and reads
-    # no variable for it (iOS reads EXACT_BUILD_NUMBER). Until it does, write
-    # the number EAS manages into the checkout, and fail if the line is gone.
     - run:
-        name: Set the version code (EAS remote version)
-        inputs:
-          version_code: ${ eas.job.version.versionCode }
-        command: |
-          set -euo pipefail
-          GRADLE=../exact/host/android/app/build.gradle.kts
-          CODE="${ inputs.version_code }"
-          case "$CODE" in ''|*[!0-9]*) echo "Version code is not a number: '$CODE'" >&2; exit 1;; esac
-          test "$(grep -c '^        versionCode = 1$' "$GRADLE")" = 1 || { echo "versionCode line not found once in $GRADLE" >&2; exit 1; }
-          sed -i.bak "s/^        versionCode = 1$/        versionCode = $CODE/" "$GRADLE" && rm "$GRADLE.bak"
-          echo "versionCode = $CODE"
-
-    - run:
-        name: Build the APK
+        name: Build
         command: |
           set -euo pipefail
           export EXACT_FEEDBACK=0 CARGO_INCREMENTAL=0
-          # The EAS worker's ~/.gradle/init.gradle adds a Maven repository to every
-          # project, and Exact's settings.gradle.kts refuses project repositories
-          # (FAIL_ON_PROJECT_REPOS). A Gradle home of our own skips that script.
-          export GRADLE_USER_HOME="$HOME/.gradle-exact"
-          export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
-          # NDK 27.1.12297006 is the one Exact tries first. Platform 37.2
-          # (compileSdk) must be installed: sdkmanager "platforms;android-37.2"
-          # (68 MB). The local build needed no other SDK part.
-          bun exact.mjs android --release
+          bun "$EXACT/scripts/exact.mjs" setup --check --platform android
+          # EAS remote versioning resolves the next number before the job
+          # starts. EXACT_VERSION comes from the profile's env in eas.json.
+          export EXACT_BUILD_NUMBER="${ eas.job.version.versionCode }"
+          echo "Version code: $EXACT_BUILD_NUMBER  Version name: $EXACT_VERSION"
+          export EXACT_UPDATE_TRUST=production
+          bun exact.mjs android --release --no-install --json > artifact.json
+          cat artifact.json
           ls -lh target/android/app/outputs/apk/release/app-release.apk
 
+    # Every path must exist before saving, or the whole save aborts.
+    - run:
+        name: Create the cache folders
+        command: |
+          mkdir -p "$HOME/workingdir/build/target" "$HOME/workingdir/exact/target" "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cargo/hermes-lean-sys" "$HOME/.rustup/toolchains"
+    - eas/save_cache:
+        if: ${ success() }
+        inputs:
+          key: exact-android-v2-apk-${ hashFiles('.exact-ref', 'Cargo.lock') }
+          path: |
+            ${ eas.env.HOME }/workingdir/build/target
+            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/.cargo/registry
+            ${ eas.env.HOME }/.cargo/git
+            ${ eas.env.HOME }/.cargo/hermes-lean-sys
+            ${ eas.env.HOME }/.rustup/toolchains
+
     - eas/upload_artifact:
-        name: Upload the APK
         inputs:
           type: application-archive
           path: target/android/app/outputs/apk/release/app-release.apk

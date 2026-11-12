@@ -18,7 +18,11 @@
         "config": "android-exact.yml",
         "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-58"
       },
-      "autoIncrement": true
+      "autoIncrement": true,
+      "bun": "1.4.2",
+      "env": {
+        "EXACT_VERSION": "0.1.0"
+      }
     },
     "ios-exact-nobump": {
       "extends": "ios-exact",
