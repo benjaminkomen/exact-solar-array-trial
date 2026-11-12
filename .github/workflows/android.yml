@@ -15,37 +15,10 @@ name: Android
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "app.contract"
-      - "app.ts"
-      - "app.json"
-      - "assets/**"
-      - "gpu/**"
-      - "android/**"
-      - "linux/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "exact.mjs"
-      - ".exact-ref"
-      - "scripts/normalize-mtimes.sh"
-      - ".github/workflows/android.yml"
+  # A pull request builds only while it has the "build-android" label. Adding the
+  # label is the approval; removing it stops further builds.
   pull_request:
-    paths:
-      - "app.contract"
-      - "app.ts"
-      - "app.json"
-      - "assets/**"
-      - "gpu/**"
-      - "android/**"
-      - "linux/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "exact.mjs"
-      - ".exact-ref"
-      - "scripts/normalize-mtimes.sh"
-      - ".github/workflows/android.yml"
+    types: [labeled, synchronize, reopened]
 
 concurrency:
   group: android-${{ github.ref }}
@@ -60,6 +33,7 @@ env:
 
 jobs:
   android:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'build-android')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
