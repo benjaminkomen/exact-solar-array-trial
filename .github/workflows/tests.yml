@@ -69,9 +69,11 @@ jobs:
           cargo test --locked -p exact-solar-trial-gpu
           ls "$EXACT_GPU_OUT"/roof-noon* "$EXACT_GPU_OUT"/roof-dusk*
 
-      # Saved even when a test fails, so a red run still warms the next one.
+      # Saved only after a green run. A cancelled or failed run saved a half-full
+      # cache under this key, and a saved key is never replaced, so every later
+      # run restored that thin cache.
       - name: Save caches
-        if: always() && steps.cache.outputs.cache-hit != 'true'
+        if: success() && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: |
