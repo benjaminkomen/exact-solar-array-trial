@@ -29,14 +29,22 @@ build:
     # build works without any of this.
     - eas/restore_cache:
         inputs:
-          key: exact-android-v2-bundle-${ hashFiles('.exact-ref', 'Cargo.lock') }
+          key: exact-android-v3-bundle-${ hashFiles('.exact-ref', 'Cargo.lock') }
           path: |
-            ${ eas.env.HOME }/workingdir/build/target
-            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/workingdir/target-pack
             ${ eas.env.HOME }/.cargo/registry
             ${ eas.env.HOME }/.cargo/git
             ${ eas.env.HOME }/.cargo/hermes-lean-sys
             ${ eas.env.HOME }/.rustup/toolchains
+
+    # eas/save_cache skips folders that start with a dot, so the .fingerprint folders
+    # of Cargo's target dirs were never saved and Cargo rebuilt every crate. The
+    # target dirs travel as one tar file instead.
+    - run:
+        name: Unpack the saved target folders
+        command: |
+          PACK="$HOME/workingdir/target-pack/targets.tar"
+          if [ -f "$PACK" ]; then tar -C "$HOME/workingdir" -xf "$PACK" && echo "Unpacked $(du -h "$PACK" | cut -f1)"; else echo "No saved target folders"; fi
 
     - run:
         name: Prepare Exact (checkout, Bun deps, Rust, Hermes)
@@ -99,16 +107,17 @@ build:
 
     # Every path must exist before saving, or the whole save aborts.
     - run:
-        name: Create the cache folders
+        name: Pack the target folders and create the cache folders
         command: |
-          mkdir -p "$HOME/workingdir/build/target" "$HOME/workingdir/exact/target" "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cargo/hermes-lean-sys" "$HOME/.rustup/toolchains"
+          mkdir -p "$HOME/workingdir/target-pack" "$HOME/.cargo/registry" "$HOME/.cargo/git" "$HOME/.cargo/hermes-lean-sys" "$HOME/.rustup/toolchains"
+          tar -C "$HOME/workingdir" -cf "$HOME/workingdir/target-pack/targets.tar" $(cd "$HOME/workingdir" && ls -d build/target exact/target 2>/dev/null)
+          du -h "$HOME/workingdir/target-pack/targets.tar"
     - eas/save_cache:
         if: ${ success() }
         inputs:
-          key: exact-android-v2-bundle-${ hashFiles('.exact-ref', 'Cargo.lock') }
+          key: exact-android-v3-bundle-${ hashFiles('.exact-ref', 'Cargo.lock') }
           path: |
-            ${ eas.env.HOME }/workingdir/build/target
-            ${ eas.env.HOME }/workingdir/exact/target
+            ${ eas.env.HOME }/workingdir/target-pack
             ${ eas.env.HOME }/.cargo/registry
             ${ eas.env.HOME }/.cargo/git
             ${ eas.env.HOME }/.cargo/hermes-lean-sys
