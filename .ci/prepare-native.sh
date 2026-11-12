@@ -30,6 +30,9 @@ case "$1" in
 esac
 rustup toolchain install "$pin" --profile minimal --target "$triple"
 cargo +"$pin" run --locked --manifest-path "$EXACT/vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml" -- --target "$triple"
+# Exact's scripts build with --offline, so fetch every crate of its workspace now.
+# Without this a clean worker fails with "no matching package named `wat` found".
+cargo +"$pin" fetch --locked --manifest-path "$EXACT/Cargo.toml"
 if command -v set-env >/dev/null 2>&1; then
   set-env EXACT "$EXACT"
   set-env PATH "$PATH"
