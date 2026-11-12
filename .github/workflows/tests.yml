@@ -49,8 +49,10 @@ jobs:
             ~/.cache/exact/web-modules
             ~/.rustup/toolchains
             ~/.rustup/update-hashes
+          # No restore-keys: a cache from another Exact commit must not restore.
+          # install.sh sets Exact's file times to its commit time, so a restored
+          # target/ built from different sources could look fresh to Cargo.
           key: tests-${{ runner.os }}-${{ hashFiles('.exact-ref', 'Cargo.lock') }}
-          restore-keys: tests-${{ runner.os }}-
 
       # Chrome sometimes does not answer within 15 s on the first start of a run
       # that restored a large cache (two failures, and the rerun of one passed).

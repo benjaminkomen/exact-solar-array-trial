@@ -1,13 +1,17 @@
 # Build the Exact Android app (a release APK) on a GitHub-hosted Linux runner.
 #
-# Exact's own script makes the APK: bun exact.mjs android. With no device
-# attached it builds and says so, which is what a runner needs. There is no
-# emulator step: the APK is arm64 and the hosted x86 runners cannot run it fast.
-# The UI tests run in tests.yml on the web host, and `test android` runs on a
-# developer machine with an emulator.
+# Exact's own script makes the APK: bun exact.mjs android --release --no-install
+# (no adb, no device). There is no emulator step: the APK is arm64 and the
+# hosted x86 runners cannot run it fast. The UI tests run in tests.yml on the
+# web host, and `test android` runs on a developer machine with an emulator.
 #
-# The APK is signed with Exact's debug key (host/android/app/build.gradle.kts).
-# It installs on a device. Google Play does not accept it.
+# The APK is signed with Exact's debug key. It installs on a device. Google Play
+# does not accept it.
+#
+# A second step builds the App Bundle (--bundle) with a throwaway upload key
+# made in the job. It proves the bundle path and the version inputs
+# (EXACT_BUILD_NUMBER, EXACT_VERSION); it is not uploaded as a release.
+# app.json sets deploy.store.linux to "0", so the build has no Exact updates.
 #
 # The Exact commit comes from .exact-ref, and the Bun and Rust versions from
 # that Exact checkout.
@@ -29,6 +33,7 @@ env:
   CARGO_INCREMENTAL: "0"
   EXACT_FEEDBACK: "0"
   ANDROID_PLATFORM: "37.2"
+  ANDROID_BUILD_TOOLS: "37.0.0"
   ANDROID_NDK: "27.1.12297006"
 
 jobs:
@@ -78,11 +83,11 @@ jobs:
           rustup toolchain install "$PIN" --profile minimal --target aarch64-linux-android
           rustc "+$PIN" --version
 
-      - name: Android SDK platform and NDK
+      - name: Android SDK platform, build-tools and NDK
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platforms;android-${ANDROID_PLATFORM}" "ndk;${ANDROID_NDK}"
+          "$SDKMANAGER" "platforms;android-${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}" "ndk;${ANDROID_NDK}"
           echo "JAVA_HOME=$JAVA_HOME"; java -version
 
       - uses: Swatinem/rust-cache@v2
@@ -124,15 +129,32 @@ jobs:
         working-directory: ${{ github.workspace }}/exact
         run: cargo fetch --locked
 
+      - name: Check the Android prerequisites
+        run: bun ../exact/scripts/exact.mjs setup --check --platform android
+
       - name: Build the release APK
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          bun exact.mjs android 2>&1 | tee build.log
-          APK=target/android/app/outputs/apk/release/app-release.apk
+          EXACT_UPDATE_TRUST=production bun exact.mjs android --release --no-install --json 2> build.log | tee artifact.json
+          APK=$(jq -r .path artifact.json)
           test -f "$APK"
           cp "$APK" artifacts/ExactSolarTrial.apk
           ls -lh artifacts
+
+      - name: Build a signed App Bundle with a throwaway key
+        run: |
+          set -euo pipefail
+          KS="$RUNNER_TEMP/upload.jks"
+          keytool -genkeypair -keystore "$KS" -storepass throwaway -keypass throwaway -alias upload \
+            -keyalg RSA -keysize 2048 -validity 30 -dname "CN=Throwaway Upload, O=Test, C=NL" >/dev/null 2>&1
+          export EXACT_KEYSTORE="$KS" EXACT_KEYSTORE_PASSWORD=throwaway EXACT_KEY_ALIAS=upload EXACT_KEY_PASSWORD=throwaway
+          export EXACT_BUILD_NUMBER="${{ github.run_number }}" EXACT_VERSION=2.3.4
+          bun exact.mjs android --bundle --json 2>> build.log | tee bundle.json
+          AAB=$(jq -r .path bundle.json)
+          test -f "$AAB"
+          keytool -printcert -jarfile "$AAB" | grep -E "^Owner"
+          ls -lh "$AAB"
 
       - name: Show the build log on failure
         if: failure()
