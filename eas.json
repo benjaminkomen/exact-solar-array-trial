@@ -44,6 +44,12 @@
     "android-exact-store-nobump": {
       "extends": "android-exact-store",
       "autoIncrement": false
+    },
+    "android-exact-fingerprint": {
+      "extends": "android-exact-nobump",
+      "env": {
+        "CARGO_LOG": "cargo::core::compiler::fingerprint=info"
+      }
     }
   },
   "submit": {
