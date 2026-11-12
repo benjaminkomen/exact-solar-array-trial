@@ -52,8 +52,15 @@ jobs:
           key: tests-${{ runner.os }}-${{ hashFiles('.exact-ref', 'Cargo.lock') }}
           restore-keys: tests-${{ runner.os }}-
 
+      # Chrome sometimes does not answer within 15 s on the first start of a run
+      # that restored a large cache (two failures, and the rerun of one passed).
+      # The second pass is quick: everything is already installed and built.
       - name: Toolchain, then UI tests (bun exact.mjs test web)
-        run: bash .cursor/install.sh
+        run: |
+          bash .cursor/install.sh || {
+            echo "::warning::The first pass failed. Retrying once."
+            bash .cursor/install.sh
+          }
 
       # No GPU on the runner: Chrome's bundled SwiftShader is the Vulkan driver.
       # The test skips when it finds no adapter, so the step then checks that
