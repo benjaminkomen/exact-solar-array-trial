@@ -1,0 +1,19 @@
+[package]
+name = "exact-solar-trial-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "exact-solar-trial-linux"
+path = "src/main.rs"
+
+[dependencies]
+exact-logic = { path = "../../exact/logic" }
+exact-linux = { path = "../../exact/host/linux" }
+exact-js = { path = "../../exact/js" }
+
+[build-dependencies]
+exact-js-bake = { path = "../../exact/js/bake" }

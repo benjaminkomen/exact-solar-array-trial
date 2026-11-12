@@ -6,42 +6,29 @@
 # an unsigned device .ipa (ad-hoc signed, for a service that re-signs it) and
 # a Simulator .app. There are no Apple signing secrets.
 #
-# Exact is pre-alpha and changes daily. EXACT_REF pins the commit this repo
-# was last built against. Bump it when you update the Exact checkout.
+# Exact is pre-alpha and changes daily. The file .exact-ref pins the commit this
+# repo was last built against. Bump it when you update the Exact checkout.
 name: iOS
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "app.contract"
-      - "app.ts"
-      - "app.json"
-      - "app.test.contract"
-      - "assets/**"
-      - "gpu/**"
-      - "apple/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "exact.mjs"
-      - "package.json"
-      - ".github/workflows/ios.yml"
+  # A pull request builds only while it has the "build-ios" label. Adding the
+  # label is the approval; removing it stops further builds.
+  pull_request:
+    types: [labeled, synchronize, reopened]
 
 concurrency:
   group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
-  # github.com/expo/exact @ 2026-11-10 (the checkout the web demo was built with)
-  EXACT_REF: 1bdedcb30ffcb3a1dd8a181ba4ac16cb4f41ce19
-  BUN_VERSION: "1.4.2"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   EXACT_FEEDBACK: "0"
 
 jobs:
   ios:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'build-ios')
     # Exact's own CI uses macos-26, but that image's default Xcode cannot
     # compile Exact's Swift host (UIArrangementViewController and newer
     # AVAudioSession APIs). GitHub's xcode-27 image is the one that ships
@@ -53,16 +40,22 @@ jobs:
         working-directory: app
     steps:
       - name: Checkout this app
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: app
 
+      - name: Read the Exact pin (.exact-ref)
+        run: echo "EXACT_REF=$(tr -d '[:space:]' < .exact-ref)" >> "$GITHUB_ENV"
+
       - name: Checkout Exact
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: expo/exact
           ref: ${{ env.EXACT_REF }}
           path: exact
+
+      - name: Fix file times of the Exact checkout (keeps the Cargo cache fresh)
+        run: bash scripts/normalize-mtimes.sh ../exact
 
       - name: Show Xcode
         working-directory: ${{ github.workspace }}
@@ -78,9 +71,15 @@ jobs:
           rustc "+$PIN" --version
           rustup target list --installed --toolchain "$PIN"
 
+      # Exact pins its own Bun (packageManager in its package.json).
+      - name: Read Exact's Bun version
+        id: bun
+        run: echo "version=$(jq -r '.packageManager | sub("^bun@"; "")' exact/package.json)" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ github.workspace }}
+
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: ${{ env.BUN_VERSION }}
+          bun-version: ${{ steps.bun.outputs.version }}
 
       # Exact's own CI caches Cargo this way. app/target is the bake's
       # CARGO_TARGET_DIR (the app authors its Cargo workspace beside app.json since
@@ -101,7 +100,7 @@ jobs:
       # two runs reinstalling the bundles each time.
       - name: Restore Hermes bundles
         id: hermes-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cargo/hermes-lean-sys
           key: hermes-${{ env.EXACT_REF }}-${{ runner.os }}-aarch64-apple-ios-sim
@@ -126,7 +125,7 @@ jobs:
 
       - name: Save Hermes bundles
         if: always() && steps.hermes-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cargo/hermes-lean-sys
           key: hermes-${{ env.EXACT_REF }}-${{ runner.os }}-aarch64-apple-ios-sim
@@ -155,7 +154,7 @@ jobs:
           ls -lh artifacts
 
       - name: Upload unsigned .ipa
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ExactSolarTrial-ios-ipa
           path: |
@@ -167,7 +166,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Simulator .app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ExactSolarTrial-ios-simulator
           path: app/artifacts/ExactSolarTrial-simulator.app.zip

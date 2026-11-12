@@ -3,7 +3,7 @@
 # it authors the workspace beside app.json. web/ and apple/ are the host crates Exact
 # would otherwise generate (scripts/app-shells.mjs authoredCrate).
 [workspace]
-members = ["web", "apple", "gpu"]
+members = ["android", "apple", "gpu", "linux", "web"]
 resolver = "2"
 
 [workspace.package]

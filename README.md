@@ -106,7 +106,7 @@ The native GPU test needs a Vulkan driver. On a Linux box without one, Chrome's 
 
 Exact is pre-alpha and changes daily. If a command fails, `bun exact.mjs update` refreshes the generated files against your checkout.
 
-Cursor cloud agents use [`.cursor/environment.json`](.cursor/environment.json). Its install script clones the Exact commit pinned in [`.github/workflows/ios.yml`](.github/workflows/ios.yml) beside this repo, installs the Rust, Bun and Chrome that checkout requires, fetches the attested Hermes bundles and Cargo crates, and warms `bun exact.mjs test web` so `target/` is already built. A later run skips work that is already present. Feedback uploads stay off.
+Cursor cloud agents use [`.cursor/environment.json`](.cursor/environment.json). Its install script clones the Exact commit pinned in [`.exact-ref`](.exact-ref) beside this repo, installs the Rust, Bun and Chrome that checkout requires, fetches the attested Hermes bundles and Cargo crates, and warms `bun exact.mjs test web` so `target/` is already built. A later run skips work that is already present. Feedback uploads stay off.
 
 ## Deploying the demo
 
@@ -169,6 +169,20 @@ What we found:
 **Build numbers** come from EAS remote versioning: `appVersionSource: "remote"` and `autoIncrement` on the `ios-exact` profile. EAS resolves the next number before the job starts. The custom build reads it as `${ eas.job.version.buildNumber }` and passes it to Exact as `EXACT_BUILD_NUMBER`, which Exact writes to `CFBundleVersion` in an `--archive` build (default `1`). `CFBundleShortVersionString` comes from `EXACT_VERSION` (default `0.1.0`). App Store Connect needs the build number to go up with every upload. The custom build calls `eas/install_node_modules` and `eas/resolve_build_config` first. A workflow build job only gets the credentials and the build number once eas-cli resolves them on the worker; an `eas build` from a laptop resolves them before uploading. Watch out: the first remote-versioned build only initializes the counter (to 1, which was already uploaded) and doesn't increment it. The counter is now 1, so the next build gets 2.
 
 **Cache: off.** The steps that worked are kept, commented out, in `.eas/build/ios-exact.yml`, with notes on the likely cause: a freshly installed toolchain, or rustc, RUSTFLAGS or env differing between runs.
+
+## Android build (local)
+
+`bun exact.mjs android` builds the APK and installs it. The first run names Android in `app.json` (`host.android`). The Exact CLI then asks for `bun exact.mjs update` (writes the `android/` and `linux/` crates and adds them to `Cargo.toml`) and `bun exact.mjs lock` (refreshes `Cargo.lock`).
+
+The build needs these on the Mac:
+
+- Rust 1.97.0 with the `aarch64-linux-android` target and the Android Hermes bundle (`exact setup` adds both).
+- A JDK 17 or newer.
+- The Android SDK (`ANDROID_HOME`) with NDK 27.1.12297006 and platform 37.2. Install the platform with `sdkmanager "platforms;android-37.2"` (68 MB).
+
+The APK is `target/android/app/outputs/apk/release/app-release.apk`. With more than one device attached, set `ANDROID_SERIAL` to choose where it installs. `bun exact.mjs test android` and `bun exact.mjs verify android` drive the APK on that device.
+
+The wgpu 3D module builds and renders on Android with no change. The photo step has no camera on any platform in this trial, so Android has nothing extra to do there. The Android build signs with the debug key, so it is not an upload build for Google Play.
 
 ## License
 

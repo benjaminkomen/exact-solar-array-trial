@@ -11,12 +11,45 @@
         "config": "ios-exact.yml"
       },
       "autoIncrement": true
+    },
+    "android-exact": {
+      "distribution": "internal",
+      "android": {
+        "config": "android-exact.yml",
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-58"
+      },
+      "autoIncrement": true
+    },
+    "ios-exact-nobump": {
+      "extends": "ios-exact",
+      "autoIncrement": false
+    },
+    "android-exact-nobump": {
+      "extends": "android-exact",
+      "autoIncrement": false
+    },
+    "android-exact-store": {
+      "extends": "android-exact",
+      "distribution": "store",
+      "android": {
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-58",
+        "config": "android-exact-store.yml"
+      },
+      "autoIncrement": true
+    },
+    "android-exact-store-nobump": {
+      "extends": "android-exact-store",
+      "autoIncrement": false
     }
   },
   "submit": {
     "production": {
       "ios": {
         "ascAppId": "6833494203"
+      },
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }
