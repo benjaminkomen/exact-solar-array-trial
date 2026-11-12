@@ -17,3 +17,6 @@ exact-js = { path = "../../exact/js" }
 
 [build-dependencies]
 exact-js-bake = { path = "../../exact/js/bake" }
+
+[dependencies.ibex2-sqlite]
+path = "../../exact/vendor/ibex/crates/ibex2-sqlite"

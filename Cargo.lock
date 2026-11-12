@@ -770,6 +770,7 @@ name = "exact-js"
 version = "0.1.0"
 dependencies = [
  "cc",
+ "crc32fast",
  "exact-data",
  "exact-js-value",
  "exact-plan",
@@ -778,6 +779,7 @@ dependencies = [
  "ibex2",
  "ibex2-sqlite",
  "libc",
+ "miniz_oxide 0.8.9",
  "serde_json",
  "sha2",
  "windows-sys 0.61.2",
@@ -826,6 +828,7 @@ dependencies = [
  "exact-num",
  "exact-svg-filter",
  "exact-textflow",
+ "icu_properties",
  "serde",
  "serde_json",
  "sha2",
@@ -906,6 +909,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "wasmi",
+ "wasmparser",
 ]
 
 [[package]]
@@ -987,6 +991,7 @@ dependencies = [
  "exact-js-bake",
  "exact-linux",
  "exact-logic",
+ "ibex2-sqlite",
 ]
 
 [[package]]
@@ -998,6 +1003,7 @@ dependencies = [
  "exact-js",
  "exact-js-bake",
  "exact-logic",
+ "ibex2-sqlite",
 ]
 
 [[package]]
@@ -1019,6 +1025,7 @@ dependencies = [
  "exact-js-bake",
  "exact-linux",
  "exact-logic",
+ "ibex2-sqlite",
 ]
 
 [[package]]
@@ -1036,6 +1043,7 @@ dependencies = [
 name = "exact-svg-file"
 version = "0.1.0"
 dependencies = [
+ "cssparser",
  "exact-kernel",
  "exact-motion",
  "exact-num",
@@ -1059,6 +1067,7 @@ dependencies = [
  "exact-color",
  "exact-motion",
  "exact-num",
+ "exact-plan",
  "serde",
  "serde_json",
 ]
