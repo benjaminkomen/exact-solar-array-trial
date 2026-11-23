@@ -2,7 +2,7 @@
 
 **Live demo:** https://benjaminkomen.github.io/exact-solar-array-trial/
 
-A trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework. It ports the main screens of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator) and tries to match them as closely as Exact allows. The live demo is a web build. An unsigned iOS build is produced in GitHub Actions (see below); EAS Build does not support Exact yet.
+A trial of [Exact](https://github.com/expo/exact), Expo's pre-alpha Rust app framework. It ports the main screens of [solar-array-simulator](https://github.com/benjaminkomen/solar-array-simulator) and tries to match them as closely as Exact allows. The live demo is a web build. An unsigned iOS build is produced in GitHub Actions. Signed iOS and Android builds use Exact's EAS custom-build recipes (see below).
 
 The panel art follows the RN app's `BasePanelShape`, `SolarPanel` and `ProductionPanel` and is drawn in SVG:
 - a 60 × 120 panel with an 8-point corner radius and a 2-point frame;
@@ -28,7 +28,7 @@ It follows the RN app's wizard: **Welcome → Get Started → Configure → Cont
 | Layout Editor | `custom.tsx`, `SolarPanelCanvas`, `CustomChrome`, `ZoomControls` | Step 3. The header has the compass toggle, the unlinked-count badge and Snap to origin. Drag a panel and it snaps on release to its neighbours or the 30-point grid, refusing a collision. Also: pan, zoom (200 ms ease-in-out quad, as in RN's `useZoom`), add, link, rotate and delete. Every new panel starts unlinked. Finish appears once there's at least one panel. | The bar is the web host's. The RN iOS title is empty; this uses the RN web title, "Layout Editor". |
 | Compass | `Compass.tsx` | An 80-point compass with four 40° arcs, N, E, S and W (N darker), and the notched arrow. Drag the arrow: the angle is `atan2(dx, -dy)` from the centre and snaps to the nearest 45° on release, stored in `config.compassDirection`. A tap opens the help. The toggle shows it and opens the help, as in RN. Production shows it read-only. | The snap isn't animated over 150 ms. |
 | Array Orientation sheet | `compass-help.tsx`, `CompassHelpBody` | The navigation arrow, the title and the real copy. | A full-height sheet with Close, not a 0.3-detent form sheet with a grabber. |
-| Panel Details sheet | `panel-details.tsx`, `PanelDetailsForm` | Linked Inverter (serial, efficiency, Unlink) and Available Inverters, with the real footer copy. | A full-height sheet: Exact's web host has no detents. |
+| Panel Details sheet | `panel-details.tsx`, `PanelDetailsForm` | Linked Inverter (serial, efficiency, Unlink) and Available Inverters, with the real footer copy. | Still a full-height route. Exact now has `navigationDetent` on iOS, Android and a web window under 900 px; this trial does not set one. |
 | Production | `production.tsx`, `ProductionCanvas`, `ProductionPanel` | The Total Array Output card and the canvas, centred on the panels, with per-panel wattage labels refreshed every second, the read-only compass, zoom, and the ⋯ menu. | No Simulate (sun) button; the 3D view isn't ported. Back goes to Welcome, because Finish rebuilds the stack. |
 | Micro-inverter sheet | `inverter-details.tsx`, `InverterDetailsForm` | Edit and Add titles, the Serial Number field, Efficiency with a slider, and the real footer copy. | A full-height sheet. |
 
@@ -90,7 +90,7 @@ Neither has orbit or shadows, and RN has neither. Clouds aren't ported in either
 
 ## Running it
 
-This app uses an Exact checkout by path. By default that's `../exact`; set `EXACT2` to point at another location. Use the Rust, Bun and Chrome versions your Exact checkout pins. Its README and `bun scripts/exact.mjs setup --check` list them.
+This app uses an Exact checkout by path. `bun exact.mjs` links it at `.exact/checkout`. It looks for a checkout at `../exact` first; set `EXACT` (or `EXACT2`) to point at another one. Use the Rust, Bun and Chrome versions that checkout pins. Its README and `bun .exact/checkout/scripts/exact.mjs setup --check` list them.
 
 ```sh
 git clone https://github.com/expo/exact.git
@@ -125,7 +125,7 @@ The workflow checks out a pinned Exact commit (Exact is pre-alpha and changes da
 - an unsigned device `.ipa`, with `bun exact.mjs ios --device --archive ExactSolarTrial.ipa --unsigned`. Exact ad-hoc signs it with no profile and no team, for a service that re-signs it.
 - an iOS Simulator `.app`, with `bun exact.mjs ios --no-install` (a compile check: it does not boot a simulator).
 
-There are no Apple signing secrets, so the `.ipa` cannot be installed on a phone until it is re-signed. An iOS distribution build also needs a square raster of at least 512 px in `app.json`'s `icons` array, which Exact's docs describe; this repo ships `assets/icon-1024.png`. Run the workflow from the Actions tab, or it runs on pushes to `main` that touch the app sources. The artifacts are attached to the run.
+There are no Apple signing secrets, so the `.ipa` cannot be installed on a phone until it is re-signed. An archive checks for the square icon Exact's docs require before it compiles; this repo ships `assets/icon-1024.png`. Run the workflow from the Actions tab, or it runs on pushes to `main` that touch the app sources. The artifacts are attached to the run.
 
 The workflow does not run Exact's full `bun scripts/exact.mjs setup`, which also installs the web and game toolchain. It only installs what an iOS TypeScript app needs.
 
@@ -157,18 +157,15 @@ What we found:
 - **It's fast.** A cold build took 7 to 8 minutes on EAS's M4 Pro worker, against about 37 minutes cold on GitHub's `xcode-27` runner. The worker setup (Exact checkout, rustup, Hermes, crates) took about a minute, Rust about 330 s and Swift about 30 s. The `.ipa` was 15 MB and showed up as the build's downloadable artifact. As a workflow with the cache save, the whole run took about 10.5 minutes.
 - **One workaround:** `eas build` and `eas workflow:run` resolve iOS entitlements locally and fail with "Cannot find 'expo-modules-autolinking' package in your project" when no Expo packages are installed. A devDependency on `expo-modules-autolinking` alone fixes that, without `expo` or React Native.
 - **A harmless warning:** at the end of each build the worker logs "Failed to read the app config file with `expo config` command: The `expo` package was not found." under "Unknown build phase". The build still finishes and uploads the `.ipa`. We left it alone rather than add `expo`.
-- **Caching works, but doesn't help yet.**
-  - In a build job, `eas/save_build_cache` and `eas/restore_build_cache` only handle ccache and CocoaPods. They ignore `key` and `path`, and the step still reports success.
-  - The generic `eas/save_cache` and `eas/restore_cache` take paths. They fail the whole save if one path is missing, so the build creates `~/.cache/exact` first.
-  - The cache holds the app's `target/`, Exact's `target/`, the Hermes bundles and the Cargo registry. That is 1.3 GB compressed (about 4 GB on disk). Saving takes about 2 to 2.5 minutes, and restoring about 30 seconds.
-  - The next run restored it, but Cargo still recompiled every crate (344 of them, including registry crates such as `proc-macro2`). The warm build took longer than the cold one: 11 minutes against 10.
-  - The cause isn't known yet. One run with `CARGO_LOG=cargo::core::compiler::fingerprint=info` would show why Cargo treats the restored artifacts as stale. Until then, the cache costs about 3 minutes per run for no gain.
+- **Caching.** `eas/save_build_cache` only handles ccache and CocoaPods, so the builds use `eas/save_cache`. That step skips directories whose names start with a dot, which dropped Cargo's `.fingerprint` records and made every crate look missing. The target directories are packed into one tar before the save and unpacked after the restore; that part is an EAS limit, and the tar stays. A fresh clone also dates every file at the clone, so Cargo still rebuilt Exact's path crates (`FsStatusOutdated`) after the tar was restored. Exact's reference ("Native CI preparation") now says to date the clone's files to its commit time, under a cache key that names that commit and has no fallback. `scripts/normalize-mtimes.sh` does that on the GitHub workflows and on the EAS builds, after checkout and before anything edits the clone. Exact also fixed its own target sweep truncating fingerprint mtimes to milliseconds ([expo/exact#583](https://github.com/expo/exact/issues/583)), which had made Cargo rebuild units whose generated inputs shared one kernel tick. That was inside Exact, separate from the EAS dot-directory skip.
 
 **Signing and submit work.** Build `3e8dd8fd` was signed with the iPhone Distribution identity (team 24L96WG9A8) and the EAS-managed App Store profile (no device list, `get-task-allow` false). An interactive `eas submit` uploaded it to App Store Connect, which also created the app record (6833494203, now in `eas.json`'s `production` submit profile). The workflow's `submit_ios` job is now on, so each run builds and then uploads with the API key stored on EAS.
 
 **Build numbers** come from EAS remote versioning: `appVersionSource: "remote"` and `autoIncrement` on the `ios-exact` profile. EAS resolves the next number before the job starts. The custom build reads it as `${ eas.job.version.buildNumber }` and passes it to Exact as `EXACT_BUILD_NUMBER`, which Exact writes to `CFBundleVersion` in an `--archive` build (default `1`). `CFBundleShortVersionString` comes from `EXACT_VERSION` (default `0.1.0`). App Store Connect needs the build number to go up with every upload. The custom build calls `eas/install_node_modules` and `eas/resolve_build_config` first. A workflow build job only gets the credentials and the build number once eas-cli resolves them on the worker; an `eas build` from a laptop resolves them before uploading. Watch out: the first remote-versioned build only initializes the counter (to 1, which was already uploaded) and doesn't increment it. The counter is now 1, so the next build gets 2.
 
-**Cache: off.** The steps that worked are kept, commented out, in `.eas/build/ios-exact.yml`, with notes on the likely cause: a freshly installed toolchain, or rustc, RUSTFLAGS or env differing between runs.
+**Export compliance.** The signed archive sets `EXACT_NON_EXEMPT_ENCRYPTION=false`. Exact writes that as `ITSAppUsesNonExemptEncryption` on a production iOS archive. With the key set, App Store Connect does not ask the export-compliance question at upload; without the variable, Exact leaves the key out and Connect asks each time.
+
+**Cache.** The EAS iOS and Android builds save and restore the target tar, the Cargo registry, the Hermes bundles and the toolchain. The key is the Exact commit in `.exact-ref` plus `Cargo.lock`, with no fallback key.
 
 ## Android build (local)
 
@@ -176,7 +173,7 @@ What we found:
 
 The build needs these on the Mac:
 
-- Rust 1.97.0 with the `aarch64-linux-android` target and the Android Hermes bundle (`exact setup` adds both).
+- The Rust toolchain named in the Exact checkout's `rust-toolchain.toml`, with the `aarch64-linux-android` target and the Android Hermes bundle (`exact setup` adds both).
 - A JDK 17 or newer.
 - The Android SDK (`ANDROID_HOME`) with NDK 27.1.12297006 and platform 37.2. Install the platform with `sdkmanager "platforms;android-37.2"` (68 MB).
 

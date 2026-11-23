@@ -9,8 +9,9 @@
 # a bundle unless all four are set. EXACT_BUILD_NUMBER becomes versionCode and
 # EXACT_VERSION becomes versionName.
 #
-# A bundle bakes production update trust. app.json sets deploy.store.linux to
-# "0" (no Exact updates), which is how Exact says to build without them.
+# A bundle bakes production update trust. An Android binary links an update
+# store only when deploy.store.android is "A". This app leaves it unset, so
+# the bundle needs no update signing keys or receipt.
 build:
   name: Exact Android (signed App Bundle)
   steps:
@@ -24,9 +25,8 @@ build:
 
     # Cache: only entries that name the Exact commit, the app's lockfile and the
     # build mode. No fallback key: a cache from another Exact commit is never
-    # restored. A hit saves the crates.io compiles, not the path crates (Cargo
-    # may still rebuild those, as the checkout gets new file times). A clean
-    # build works without any of this.
+    # restored. prepare-native.sh dates the Exact clone at that commit so Cargo
+    # can reuse the path crates. A clean build works without any of this.
     - eas/restore_cache:
         inputs:
           key: exact-android-v3-bundle-${ hashFiles('.exact-ref', 'Cargo.lock') }

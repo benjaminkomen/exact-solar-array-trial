@@ -11,7 +11,8 @@
 # A second step builds the App Bundle (--bundle) with a throwaway upload key
 # made in the job. It proves the bundle path and the version inputs
 # (EXACT_BUILD_NUMBER, EXACT_VERSION); it is not uploaded as a release.
-# app.json sets deploy.store.linux to "0", so the build has no Exact updates.
+# deploy.store.android is unset, so the APK and the bundle link no Exact
+# update store. deploy.store.linux stays "0" for the Linux host.
 #
 # The Exact commit comes from .exact-ref, and the Bun and Rust versions from
 # that Exact checkout.

@@ -16,6 +16,13 @@ fi
 git -C "$EXACT" fetch -q --depth 1 origin "$EXACT_REF"
 git -C "$EXACT" checkout -q --detach FETCH_HEAD
 git -C "$EXACT" log --oneline -1
+# A fresh checkout dates every file at the checkout. Cargo then treats each
+# path crate as stale against a restored target/. Dating the clone at its
+# commit time lets that target be reused, and is sound only because the cache
+# key names this commit and has no fallback (Exact's "Native CI preparation").
+# Do it before any later step edits the clone.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+bash "$SCRIPT_DIR/../scripts/normalize-mtimes.sh" "$EXACT"
 bun install --frozen-lockfile --cwd "$EXACT"
 if ! command -v rustup >/dev/null; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/exact-rustup.sh

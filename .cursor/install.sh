@@ -104,20 +104,25 @@ log "Rust toolchains from the Exact checkout"
 bun -e '
   const exact = process.argv[1];
   const toolchain = Bun.TOML.parse(await Bun.file(`${exact}/rust-toolchain.toml`).text()).toolchain;
-  const app = await Bun.file(`${exact}/scripts/app.mjs`).text();
   const marker = "export const WEB_TOOLCHAIN = ";
-  const at = app.indexOf(marker);
-  if (at < 0) throw new Error("WEB_TOOLCHAIN missing from scripts/app.mjs");
-  const quote = app[at + marker.length];
-  const end = app.indexOf(quote + ";", at + marker.length + 1);
-  const nightly = app.slice(at + marker.length + 1, end);
-  if (!nightly) throw new Error("WEB_TOOLCHAIN missing from scripts/app.mjs");
+  // The pin lives in scripts/cargo-check.mjs and is re-exported from scripts/app.mjs.
+  let nightly = "";
+  for (const file of ["scripts/cargo-check.mjs", "scripts/app.mjs"]) {
+    const app = await Bun.file(`${exact}/${file}`).text();
+    const at = app.indexOf(marker);
+    if (at < 0) continue;
+    const quote = app[at + marker.length];
+    const end = app.indexOf(quote + ";", at + marker.length + 1);
+    nightly = app.slice(at + marker.length + 1, end);
+    if (nightly) break;
+  }
+  if (!nightly) throw new Error("WEB_TOOLCHAIN missing from scripts/cargo-check.mjs and scripts/app.mjs");
   const stable = [
     "toolchain", "install", toolchain.channel, "--profile", toolchain.profile ?? "minimal",
     ...(toolchain.components ?? []).flatMap((c) => ["--component", c]),
     ...(toolchain.targets ?? []).flatMap((t) => ["--target", t]),
   ];
-  const night = ["toolchain", "install", nightly, "--profile", "minimal", "--component", "rust-src", "--component", "clippy", "--target", "wasm32-unknown-unknown"];
+  const night = ["toolchain", "install", nightly, "--profile", "minimal", "--component", "rust-src", "--component", "llvm-tools", "--component", "clippy", "--target", "wasm32-unknown-unknown"];
   for (const args of [stable, night]) {
     const result = Bun.spawnSync(["rustup", ...args], { stdout: "inherit", stderr: "inherit" });
     if (result.exitCode !== 0) process.exit(result.exitCode ?? 1);

@@ -502,8 +502,11 @@ component SolarApp
                   text "Skip"
         if e.name == "custom"
           column navigationKey=`${e.id}` position="absolute" inset=0 display="flex" flex-direction="column"
-            // CustomHeaderToolbar: compass toggle, unlinked-count link, snap to origin
-            header display="flex" align-items="center" gap=4
+            // CustomHeaderToolbar: compass toggle, unlinked-count link, snap to origin.
+            // The compass and snap faces are multi-part SVGs, and the badge is a
+            // symbol with a count. Those are not iOS bar items, so this header is
+            // drawn as written (appearance="none") on every host.
+            header appearance="none" display="flex" align-items="center" gap=4
               text "Layout Editor" role="heading" aria-level=1 flex=1
               button press=toggleCompass aria-label="Toggle compass" testId="toggle-compass"
                 svg width=22 height=22 viewBox="0 0 24 24" aria-hidden=true

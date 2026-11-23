@@ -13,8 +13,9 @@
 # toolchain and the Hermes bundles. The key names the Exact commit and the app's
 # Cargo.lock, and there is no fallback key, so a cache from another Exact commit
 # is never restored (Exact's guidance: Cargo may rebuild path crates when file
-# times change, and a clean build must work without the cache). Not yet shown
-# on EAS: the second build with the same pin is the measure.
+# times change, and a clean build must work without the cache). The checkout
+# step dates Exact's files at that commit so Cargo can reuse the restored
+# target. The second build with the same pin is the measure.
 build:
   name: Exact iOS (signed App Store .ipa)
   steps:
@@ -60,6 +61,9 @@ build:
           git init -q && git remote add origin https://github.com/expo/exact.git
           git fetch -q --depth 1 origin "$EXACT_REF" && git checkout -q FETCH_HEAD
           git log --oneline -1
+          # Date the clone at its commit so a restored target/ stays fresh.
+          # The cache key names this commit and has no fallback.
+          bash "$APP/scripts/normalize-mtimes.sh" "$PWD"
           PIN=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
           if ! command -v rustup >/dev/null; then
             curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
