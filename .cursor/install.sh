@@ -200,6 +200,11 @@ bun -e '
   }
 ' "$EXACT"
 
+# The Hermes installer builds --offline against Exact's lock. Fetch that lock
+# first, or a clean registry fails with "no matching package named sha2".
+log "cargo fetch (Exact)"
+(cd "$EXACT" && cargo fetch --locked)
+
 INSTALLER="$EXACT/vendor/ibex/crates/hermes-lean-sys-installer/Cargo.toml"
 log "Hermes bundles"
 if ! (cd "$EXACT" && cargo run --locked --offline --manifest-path "$INSTALLER" -- --check); then
@@ -207,8 +212,14 @@ if ! (cd "$EXACT" && cargo run --locked --offline --manifest-path "$INSTALLER" -
   (cd "$EXACT" && cargo run --locked --manifest-path "$INSTALLER" --)
 fi
 
-log "cargo fetch (Exact, then this app)"
-(cd "$EXACT" && cargo fetch --locked)
+# Cargo.toml's [patch.crates-io] paths are .exact/checkout/vendor/... . That
+# symlink is created by bun exact.mjs, which has not run yet. Without it,
+# cargo fetch says the patch location does not contain accesskit_windows.
+log "link .exact/checkout"
+mkdir -p "$ROOT/.exact"
+ln -sfn "$EXACT" "$ROOT/.exact/checkout"
+
+log "cargo fetch (this app)"
 (cd "$ROOT" && cargo fetch --locked)
 
 log "warm bun exact.mjs test web"
