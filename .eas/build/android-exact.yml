@@ -6,8 +6,8 @@
 # debug key: it installs on a device but Google Play does not take it. The
 # Play build is android-exact-store.yml.
 #
-# Production update trust needs either update signing keys or no Exact
-# updates; app.json sets deploy.store.linux to "0" (no updates).
+# An Android binary links an update store only when deploy.store.android is
+# "A". This app leaves it unset, so the APK needs no update signing keys.
 build:
   name: Exact Android (APK)
   steps:
@@ -21,9 +21,8 @@ build:
 
     # Cache: only entries that name the Exact commit, the app's lockfile and the
     # build mode. No fallback key: a cache from another Exact commit is never
-    # restored. A hit saves the crates.io compiles, not the path crates (Cargo
-    # may still rebuild those, as the checkout gets new file times). A clean
-    # build works without any of this.
+    # restored. prepare-native.sh dates the Exact clone at that commit so Cargo
+    # can reuse the path crates. A clean build works without any of this.
     - eas/restore_cache:
         inputs:
           key: exact-android-v3-apk-${ hashFiles('.exact-ref', 'Cargo.lock') }

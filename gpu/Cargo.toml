@@ -14,12 +14,12 @@ name = "exact_solar_trial_gpu"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-exact-gpu = { path = "../../exact/gpu" }
+exact-gpu = { path = "../.exact/checkout/gpu" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
+wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
 
 [build-dependencies]
-exact-gpu-reflect = { path = "../../exact/gpu/reflect" }
+exact-gpu-reflect = { path = "../.exact/checkout/gpu/reflect" }
